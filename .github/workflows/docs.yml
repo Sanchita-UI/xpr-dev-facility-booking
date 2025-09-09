@@ -2,11 +2,11 @@ name: Documentation
 
 on:
   workflow_dispatch:
-    inputs:              
-      commit:
-        description: "Commit SHA to deploy (optional)"
-        required: false
-        type: string
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'main'
 env:
   # Define any environment variables needed for the build
   buildNumber: ${{ github.run_number }} # Use GitHub's run number as the build number
