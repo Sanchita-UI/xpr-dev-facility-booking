@@ -22,6 +22,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GH_TOKEN }} # GitHub token for API access
  
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.branch }}
       - name: Navigate to Workspace
         run: cd ${{ github.workspace }}                  
 
