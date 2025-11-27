@@ -1,0 +1,31 @@
+.secondary-nav {
+  background-color: #e8e8e8;
+  padding: 12px 24px;
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid #d0d0d0;
+}
+
+.nav-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: transparent;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  transition: all 0.2s;
+}
+
+.nav-button:hover {
+  background-color: #fff;
+  border-color: #bbb;
+}
+
+.nav-icon {
+  font-size: 16px;
+}
+
