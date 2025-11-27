@@ -1,3 +1,7 @@
+# xpr-dev-facility-booking
+
+This is project for New Facility Booking Micro-Frontend for Xplor Rec
+
 # Contract Management Application
 
 A React-based contract management interface built with Vite.
@@ -81,4 +85,3 @@ contract-management-app/
 ## License
 
 MIT
-

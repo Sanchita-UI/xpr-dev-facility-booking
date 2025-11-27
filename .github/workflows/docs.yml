@@ -1,0 +1,65 @@
+name: Documentation 
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'main'
+env:
+  # Define any environment variables needed for the build
+  buildNumber: ${{ github.run_number }} # Use GitHub's run number as the build number
+  branchOrTag: ${{ github.ref_name }}
+
+permissions: write-all
+jobs:
+  push-documentation:
+    name: Push Document
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/PMDEV-233666-NRPA-Web-Frontend'
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }} # GitHub token for API access
+ 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.branch }}
+      - name: Navigate to Workspace
+        run: cd ${{ github.workspace }}                  
+
+      - name: Checkout self repository at specific commit
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GH_TOKEN }}
+          ref: ${{ github.event.inputs.commit || github.sha }}
+          path: ${{ github.workspace }}        
+          
+      - name: Run Cursor Agent
+        shell: bash
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          curl https://cursor.com/install -fsS | bash          
+          export PATH="$HOME/.local/bin:$PATH"          
+          echo "cursor-agent --version start"
+          cursor-agent --version
+          echo "cursor-agent --version end"
+          ls
+          timeout 300 cursor-agent -p --force "Follow the commands in the ai-docs-command.txt" --model auto --output-format stream-json 2>&1 | tee agent.log echo "Exit code: $?" || echo $?
+          echo "cursor-agent ended"
+          ls
+      - name: Commit and push docs
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"          
+          git status
+          git add docs
+          git commit -m "Update docs from workflow run ${{ github.run_number }}"
+          $branch = "${env:branchOrTag}".Replace('refs/heads/', '')
+          git push origin HEAD:$branch
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
