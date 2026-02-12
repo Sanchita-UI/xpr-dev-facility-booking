@@ -1,0 +1,142 @@
+.delete-toast-container {
+  display: flex;
+  flex-direction: column;
+  background-color: #fee;
+  border-left: 4px solid #e74c3c;
+  border-radius: 4px;
+  min-width: 300px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  position: relative;
+}
+
+.delete-toast-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.delete-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background-color: #e74c3c;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.delete-icon {
+  font-size: 14px;
+  color: white;
+}
+
+.delete-message {
+  font-size: 14px;
+  font-weight: 500;
+  color: #c0392b;
+}
+
+.delete-toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.undo-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+    background: rgba(153, 27, 27, 0.1) !important;
+    border: 1px solid rgba(153, 27, 27, 0.2) !important;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #991b1b !important;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.undo-button:hover {
+  background-color: #27ae60;
+}
+
+.undo-button:active {
+  background-color: #229954;
+}
+
+.undo-icon {
+  font-size: 14px;
+  color: #991b1b;
+}
+
+.undo-button span {
+  color: #991b1b;
+}
+
+.close-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #c0392b;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.close-button:hover {
+  background-color: rgba(192, 57, 43, 0.1);
+}
+
+.close-icon {
+  font-size: 14px;
+  color: #c0392b;
+}
+
+.delete-toast-content-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+}
+
+.delete-toast-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+/* Progress Bar */
+.toast-progress-bar-container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background-color: rgba(231, 76, 60, 0.2);
+  overflow: hidden;
+}
+
+.toast-progress-bar {
+  height: 100%;
+  background-color: #e74c3c;
+  will-change: width;
+  transform: translateZ(0); /* Force hardware acceleration */
+}
+
+/* React Hot Toast - Custom delete toast styles */
+/* The toast container is handled by react-hot-toast */
+

@@ -1,37 +1,575 @@
-import React, { useState } from 'react'
-import { FaArrowLeft, FaCopy, FaEnvelope, FaPhone, FaMapMarkerAlt, FaCalendarAlt, FaClock, FaUsers, FaPlus, FaCheck, FaFileExport, FaFileAlt, FaPaperclip, FaToggleOn, FaToggleOff, FaList, FaTimes, FaSearch, FaChevronUp, FaChevronDown, FaChevronLeft, FaChevronRight } from 'react-icons/fa'
+import React, { useState, useMemo, useRef, useEffect } from 'react'
+import { useReactTable, getCoreRowModel, getSortedRowModel, getFilteredRowModel, getPaginationRowModel, getExpandedRowModel, flexRender } from '@tanstack/react-table'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy, horizontalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { FaArrowLeft, FaCopy, FaEnvelope, FaPhone, FaMapMarkerAlt, FaCalendarAlt, FaClock, FaUsers, FaPlus, FaCheck, FaCheckCircle, FaFileExport, FaFileAlt, FaPaperclip, FaToggleOn, FaToggleOff, FaList, FaTimes, FaSearch, FaChevronUp, FaChevronDown, FaChevronLeft, FaChevronRight, FaUndo, FaEdit, FaTrash, FaEllipsisV } from 'react-icons/fa'
+import toast, { Toaster } from 'react-hot-toast'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { sessionsData } from '../data/mockData'
 import SendContractModal from '../components/SendContractModal'
 import FirmContractModal from '../components/FirmContractModal'
 import CancelContractModal from '../components/CancelContractModal'
+import EditSessionModal from '../components/EditSessionModal'
 import MapThumbnail from '../components/MapThumbnail'
+import DeleteToast from '../components/DeleteToast'
+import SuccessToast from '../components/SuccessToast'
 import meetingRoomImage from '../assets/images/meeting-room.jpg'
 import extrasImage from '../assets/images/extras.jpg'
 import './ContractDetails.css'
 
+// Column Filter Dropdown Component
+const ColumnFilterDropdown = ({ column, table, accessorKey, sessions, openFilterId, setOpenFilterId }) => {
+  const filterId = `filter-${accessorKey}`
+  const isOpen = openFilterId === filterId
+  const filterValue = column.getFilterValue() || []
+  const containerRef = useRef(null)
+  const menuRef = useRef(null)
+  
+  // Get unique values from the sessions data
+  const uniqueValues = useMemo(() => {
+    const values = sessions.map(session => {
+      const value = session[accessorKey]
+      return value ? String(value) : ''
+    })
+    return [...new Set(values)].filter(v => v !== '').sort()
+  }, [sessions, accessorKey])
+  
+  const handleToggle = (value) => {
+    const currentFilters = Array.isArray(filterValue) ? filterValue : []
+    const newFilters = currentFilters.includes(value)
+      ? currentFilters.filter(v => v !== value)
+      : [...currentFilters, value]
+    column.setFilterValue(newFilters.length > 0 ? newFilters : undefined)
+  }
+  
+  const handleSelectAll = () => {
+    column.setFilterValue(undefined)
+  }
+  
+  const handleClearAll = () => {
+    column.setFilterValue(undefined)
+  }
+  
+  // Position dropdown relative to column header and update on scroll/resize
+  useEffect(() => {
+    if (isOpen && containerRef.current && menuRef.current) {
+      const container = containerRef.current
+      const menu = menuRef.current
+      const columnHeader = container.closest('.column-header-with-filter')
+      
+      const updatePosition = () => {
+        if (columnHeader && menu) {
+          const headerRect = columnHeader.getBoundingClientRect()
+          
+          // Check if header is still visible in viewport
+          const isHeaderVisible = headerRect.top >= 0 && 
+                                 headerRect.left >= 0 && 
+                                 headerRect.bottom <= window.innerHeight &&
+                                 headerRect.right <= window.innerWidth
+          
+          // If header is not visible, close the dropdown
+          if (!isHeaderVisible) {
+            setOpenFilterId(null)
+            return
+          }
+          
+          // Position dropdown relative to viewport using fixed positioning
+          menu.style.position = 'fixed'
+          menu.style.left = `${headerRect.left}px`
+          menu.style.top = `${headerRect.bottom + 2}px`
+          menu.style.width = `${Math.max(headerRect.width, 220)}px`
+          menu.style.minWidth = '220px'
+          menu.style.maxWidth = '280px'
+        }
+      }
+      
+      // Initial positioning
+      updatePosition()
+      
+      // Throttle scroll events for better performance using requestAnimationFrame
+      let scrollTimeout
+      const handleScroll = () => {
+        if (scrollTimeout) {
+          cancelAnimationFrame(scrollTimeout)
+        }
+        scrollTimeout = requestAnimationFrame(() => {
+          updatePosition()
+        })
+      }
+      
+      // Update position on resize
+      const handleResize = () => {
+        updatePosition()
+      }
+      
+      // Add event listeners to window and scrollable containers
+      window.addEventListener('scroll', handleScroll, true) // Use capture phase to catch all scrolls
+      window.addEventListener('resize', handleResize)
+      
+      // Also listen to table container scroll if it exists
+      const tableContainer = container.closest('.sessions-table-container') || 
+                             container.closest('.table-container') ||
+                             document.querySelector('.sessions-table')?.parentElement ||
+                             document.querySelector('table')?.parentElement
+      
+      if (tableContainer) {
+        tableContainer.addEventListener('scroll', handleScroll, true)
+      }
+      
+      // Listen to all scrollable parents
+      let parent = container.parentElement
+      const scrollableParents = []
+      while (parent && parent !== document.body) {
+        if (parent.scrollHeight > parent.clientHeight) {
+          parent.addEventListener('scroll', handleScroll, true)
+          scrollableParents.push(parent)
+        }
+        parent = parent.parentElement
+      }
+      
+      return () => {
+        window.removeEventListener('scroll', handleScroll, true)
+        window.removeEventListener('resize', handleResize)
+        if (tableContainer) {
+          tableContainer.removeEventListener('scroll', handleScroll, true)
+        }
+        scrollableParents.forEach(parent => {
+          parent.removeEventListener('scroll', handleScroll, true)
+        })
+        if (scrollTimeout) {
+          cancelAnimationFrame(scrollTimeout)
+        }
+      }
+    }
+  }, [isOpen, setOpenFilterId])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isOpen && 
+          !event.target.closest('.filter-dropdown-container') && 
+          !event.target.closest('.filter-dropdown-menu')) {
+        setOpenFilterId(null)
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isOpen, setOpenFilterId])
+  
+  return (
+    <>
+      <div className="filter-dropdown-container" ref={containerRef} onClick={(e) => e.stopPropagation()}>
+        <button 
+          className="filter-dropdown-trigger"
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpenFilterId(isOpen ? null : filterId)
+          }}
+          type="button"
+        >
+          <FaEllipsisV className="filter-icon" />
+          {filterValue && filterValue.length > 0 && (
+            <span className="filter-badge">{filterValue.length}</span>
+          )}
+        </button>
+      </div>
+      {isOpen && (
+        <div 
+          className="filter-dropdown-menu" 
+          ref={menuRef}
+          id={filterId}
+          role="menu"
+          aria-labelledby={`filter-trigger-${accessorKey}`}
+        >
+          <div className="filter-dropdown-header" role="heading" aria-level="3">FILTER</div>
+          <div className="filter-dropdown-options" role="group" aria-label={`Filter options for ${accessorKey}`}>
+            {uniqueValues.length > 0 ? (
+              uniqueValues.map(value => (
+                <label key={value} className="filter-option" role="menuitemcheckbox" aria-checked={filterValue?.includes(value) || false}>
+                  <input
+                    type="checkbox"
+                    checked={filterValue?.includes(value) || false}
+                    onChange={() => handleToggle(value)}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Filter by ${value}`}
+                  />
+                  <span>{value}</span>
+                </label>
+              ))
+            ) : (
+              <div className="filter-no-options" role="status" aria-live="polite">No options available</div>
+            )}
+          </div>
+          {filterValue && filterValue.length > 0 && (
+            <button 
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleClearAll()
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleClearAll()
+                }
+              }}
+              className="filter-clear-btn"
+              aria-label="Clear all filters"
+            >
+              Clear filter
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
+// Sortable Row Component
+const SortableRow = ({ row, session, table, newRowIds, duplicatedRowIds, activeRowId, restoredRowId, columnOrder, defaultColumnOrder, selectedRows, handleRowSelect, editingCell, editValue, handleCellClick, handleCellChange, handleCellSave, handleCellKeyDown, isEditing, handleFacilityChange, getAvailableFacilities, handleIncludeToggle, handleEditRow, handleDeleteRow }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: session.id,
+    disabled: editingCell !== null, // Disable drag when editing
+    data: {
+      type: 'row',
+    },
+  })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging ? 'none' : transition, // Disable transition while dragging for smoother experience
+    opacity: isDragging ? 0.5 : 1,
+    cursor: isDragging ? 'grabbing' : 'grab',
+  }
+
+  const isRestored = restoredRowId === session.id
+
+  // Custom listeners that prevent dragging on interactive elements
+  const handlePointerDown = (e) => {
+    const target = e.target
+    const closestEditable = target.closest('.editable-cell')
+    
+    // First check: If clicking on or inside an editable cell, prevent drag
+    if (closestEditable) {
+      e.stopPropagation()
+      return
+    }
+    
+    // Check if clicking on interactive elements - prevent drag on these
+    if (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'SELECT' ||
+      target.tagName === 'BUTTON' ||
+      target.closest('input') ||
+      target.closest('select') ||
+      target.closest('button') ||
+      target.closest('.expand-button') ||
+      target.closest('.facility-dropdown') ||
+      target.closest('.toggle-on') ||
+      target.closest('.toggle-off') ||
+      target.closest('.badge') ||
+      target.closest('.row-actions') ||
+      target.closest('.action-btn') ||
+      target.closest('.filter-dropdown-container')
+    ) {
+      e.stopPropagation()
+      return
+    }
+    
+    // Allow drag on other areas - call original listener
+    if (listeners?.onPointerDown) {
+      listeners.onPointerDown(e)
+    }
+  }
+
+  const customListeners = {
+    ...listeners,
+    onPointerDown: handlePointerDown,
+  }
+
+  const isExpanded = row.getIsExpanded()
+
+  // Helper function to format date
+  const formatDate = (dateString) => {
+    if (!dateString) return ''
+    const [month, day, year] = dateString.split('/')
+    const date = new Date(year, month - 1, day)
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    return `${days[date.getDay()]} ${dateString}`
+  }
+
+  // Track if we're dragging to prevent click from firing
+  const wasDraggingRef = useRef(false)
+  
+  // Handle row click to toggle expansion
+  const handleRowClick = (e) => {
+    // Don't toggle if we just dragged (dnd-kit handles this via isDragging state)
+    if (isDragging || wasDraggingRef.current) {
+      wasDraggingRef.current = false
+      return
+    }
+    
+    // Don't toggle if clicking on interactive elements
+    const target = e.target
+    if (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'SELECT' ||
+      target.tagName === 'BUTTON' ||
+      target.closest('input') ||
+      target.closest('select') ||
+      target.closest('button') ||
+      target.closest('.expand-button') ||
+      target.closest('.editable-cell') ||
+      target.closest('.facility-dropdown') ||
+      target.closest('.toggle-on') ||
+      target.closest('.toggle-off') ||
+      target.closest('.badge') ||
+      target.closest('.row-actions') ||
+      target.closest('.action-btn') ||
+      target.closest('.filter-dropdown-container')
+    ) {
+      return
+    }
+    
+    // Toggle row expansion
+    row.toggleExpanded()
+  }
+  
+  // Track when dragging starts/ends to prevent click after drag
+  useEffect(() => {
+    if (isDragging) {
+      wasDraggingRef.current = true
+    } else if (wasDraggingRef.current) {
+      // Reset after drag ends with a small delay
+      const timeout = setTimeout(() => {
+        wasDraggingRef.current = false
+      }, 100)
+      return () => clearTimeout(timeout)
+    }
+  }, [isDragging])
+
+  return (
+    <>
+      <tr
+        ref={setNodeRef}
+        style={style}
+        data-session-id={session.id}
+        className={`${newRowIds.has(session.id) ? 'new-row' : ''} ${duplicatedRowIds.has(session.id) ? 'duplicated-row' : ''} ${isDragging ? 'dragging' : ''} ${isRestored ? 'restored-row' : ''} draggable-row`}
+        onClick={handleRowClick}
+        {...attributes}
+        {...customListeners}
+      >
+        {(columnOrder.length > 0 ? columnOrder : defaultColumnOrder)
+          .map(columnId => {
+            const cell = row.getVisibleCells().find(c => c.column.id === columnId)
+            return cell ? (
+              <td key={cell.id}>
+                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+              </td>
+            ) : null
+          })
+          .filter(Boolean)}
+      </tr>
+      {isExpanded && (
+        <tr className="expanded-row-details">
+          <td colSpan={(columnOrder.length > 0 ? columnOrder : defaultColumnOrder).length} className="expanded-cell">
+            <div className="session-details-container">
+              <div className="session-details-header">
+                <h3>Session Details - ID: {session.id}</h3>
+              </div>
+              <div className="session-details-grid">
+                <div className="detail-item">
+                  <span className="detail-label">DATE:</span>
+                  <span className="detail-value">{formatDate(session.startDate)}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">START DATE:</span>
+                  <span className="detail-value">{session.startDate || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">END DATE:</span>
+                  <span className="detail-value">{session.endDate || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">TIME RANGE:</span>
+                  <span className="detail-value">{session.startTime || 'N/A'} - {session.endTime || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">START TIME:</span>
+                  <span className="detail-value">{session.startTime || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">END TIME:</span>
+                  <span className="detail-value">{session.endTime || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">PRICE:</span>
+                  <span className="detail-value">{session.price || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">LOCATION:</span>
+                  <span className="detail-value">{session.location || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">FACILITY:</span>
+                  <span className="detail-value">{session.facility || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">EXTRA FEES:</span>
+                  <span className="detail-value">{session.extraFees || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">FEE:</span>
+                  <span className="detail-value">{session.fee || 'N/A'}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">INCLUDE:</span>
+                  <span className="detail-value">{session.include ? 'Yes' : 'No'}</span>
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+// Sortable Column Header Component
+const SortableColumnHeader = ({ header, columnId, activeColumnId, table }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: columnId,
+    data: {
+      type: 'column',
+    },
+  })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  // Custom listeners that prevent dragging on interactive elements
+  const customListeners = {
+    ...listeners,
+    onPointerDown: (e) => {
+      const target = e.target
+      // Check if clicking on interactive elements
+      if (
+        target.tagName === 'INPUT' ||
+        target.closest('input') ||
+        target.classList.contains('sort-icon-active') ||
+        target.classList.contains('sort-icon-inactive') ||
+        target.closest('.sort-icon-active') ||
+        target.closest('.sort-icon-inactive')
+      ) {
+        e.stopPropagation()
+        return
+      }
+      // Call original listener if not on interactive element
+      if (listeners?.onPointerDown) {
+        listeners.onPointerDown(e)
+      }
+    },
+  }
+
+  return (
+    <th
+      ref={setNodeRef}
+      style={{ ...style, width: header.getSize() }}
+      className={`${isDragging ? 'column-dragging' : ''} draggable-column-header`}
+      {...attributes}
+      {...customListeners}
+    >
+      {header.isPlaceholder
+        ? null
+        : flexRender(
+            header.column.columnDef.header,
+            header.getContext()
+          )}
+    </th>
+  )
+}
+
 const ContractDetails = () => {
   const [activeTab, setActiveTab] = useState('sessions')
   const [selectedRows, setSelectedRows] = useState(new Set())
-  const [selectAll, setSelectAll] = useState(false)
   const [isSendModalOpen, setIsSendModalOpen] = useState(false)
   const [isFirmModalOpen, setIsFirmModalOpen] = useState(false)
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
-  const [showNotification, setShowNotification] = useState(false)
-  const [showFirmNotification, setShowFirmNotification] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [editingSession, setEditingSession] = useState(null)
   
   // Pagination, Search, and Sorting states
-  const [currentPage, setCurrentPage] = useState(1)
-  const [entriesPerPage, setEntriesPerPage] = useState(10)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' })
+  const [globalFilter, setGlobalFilter] = useState('')
+  const [columnFilters, setColumnFilters] = useState([])
+  const [sorting, setSorting] = useState([])
+  const [pagination, setPagination] = useState({
+    pageIndex: 0,
+    pageSize: 10,
+  })
+  
+  // Row expansion state
+  const [expanded, setExpanded] = useState({})
+  
+  // Track which filter dropdown is open (only one at a time)
+  const [openFilterId, setOpenFilterId] = useState(null)
 
   // Inline editing states
   const [editingCell, setEditingCell] = useState(null) // { sessionId, field }
   const [editValue, setEditValue] = useState('') // Temporary value while editing
   const [newRowIds, setNewRowIds] = useState(new Set()) // Track newly added row IDs
   const [duplicatedRowIds, setDuplicatedRowIds] = useState(new Set()) // Track duplicated row IDs
+  
+  // Drag and drop states - using @dnd-kit
+  const [activeRowId, setActiveRowId] = useState(null)
+  const [activeColumnId, setActiveColumnId] = useState(null)
+  const [columnOrder, setColumnOrder] = useState([])
+  
+  // Sensors for @dnd-kit
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 5, // Reduced from 8px for more responsive dragging
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // Refs for undo delete functionality
+  const deletedRowRef = useRef(null)
+  const deletedRowIndexRef = useRef(null)
+  const deleteTimeoutRef = useRef(null)
+  
+  // Track if we're switching cells to prevent blur interference
+  const isSwitchingCellRef = useRef(false)
+  
+  // State to track restored row for highlighting
+  const [restoredRowId, setRestoredRowId] = useState(null)
 
   const tabs = [
     { id: 'sessions', label: 'Sessions', icon: FaList },
@@ -39,9 +577,47 @@ const ContractDetails = () => {
   ]
 
   // Fetch sessions data from mock data and ensure all include flags are true by default
-  const [sessions, setSessions] = useState(
-    sessionsData.map(session => ({ ...session, include: session.include !== undefined ? session.include : true }))
+  const initialSessions = useMemo(() => 
+    sessionsData.map(session => ({ ...session, include: session.include !== undefined ? session.include : true })),
+    []
   )
+  const [sessions, setSessions] = useState(initialSessions)
+  
+  // Initialize column order if not set
+  const defaultColumnOrder = useMemo(() => [
+    'expand',
+    'select',
+    'startDate',
+    'endDate',
+    'startTime',
+    'endTime',
+    'location',
+    'facility',
+    'extraFees',
+    'fee',
+    'price',
+    'include',
+    'actions'
+  ], [])
+  
+  // Track if row order has changed from original
+  const hasOrderChanged = useMemo(() => {
+    if (sessions.length !== initialSessions.length) return false
+    return sessions.some((session, index) => session.id !== initialSessions[index].id)
+  }, [sessions, initialSessions])
+  
+  // Track if column order has changed from original
+  const hasColumnOrderChanged = useMemo(() => {
+    if (columnOrder.length === 0 || defaultColumnOrder.length === 0) return false
+    if (columnOrder.length !== defaultColumnOrder.length) return true
+    return columnOrder.some((colId, index) => colId !== defaultColumnOrder[index])
+  }, [columnOrder, defaultColumnOrder])
+  
+  // Reset to original order (both rows and columns)
+  const handleResetOrder = () => {
+    setSessions([...initialSessions])
+    setColumnOrder([...defaultColumnOrder])
+  }
 
   // Location-Facility mapping
   const locationFacilityMap = {
@@ -175,7 +751,7 @@ const ContractDetails = () => {
     ))
   }
 
-  // Handle add new session (duplicates the last row)
+  // Handle add new session (duplicates the last row and adds at the beginning)
   const handleAddSession = () => {
     // Check if there are any sessions to duplicate
     if (sessions.length === 0) {
@@ -208,7 +784,7 @@ const ContractDetails = () => {
       return
     }
     
-    // Get the last session in the original sessions array (not filtered/sorted)
+    // Get the last session in the original sessions array (not filtered/sorted) to duplicate
     const lastSession = sessions[sessions.length - 1]
     
     // Get the maximum ID from existing sessions and add 1
@@ -221,54 +797,12 @@ const ContractDetails = () => {
       id: newId
     }
     
-    // Get filtered and sorted sessions (same logic as display)
-    const filteredAndSortedSessions = getFilteredAndSortedSessions()
-    
-    // Calculate the start index for the current page
-    const pageStartIndex = (currentPage - 1) * entriesPerPage
-    
-    // Determine where to insert the duplicated session
-    let actualInsertIndex = sessions.length // Default: insert at the end
-    
-    if (filteredAndSortedSessions.length > 0) {
-      // Get the first session visible on the current page
-      const firstVisibleIndex = pageStartIndex
-      
-      if (firstVisibleIndex < filteredAndSortedSessions.length) {
-        // Find the first visible session on current page
-        const firstVisibleSession = filteredAndSortedSessions[firstVisibleIndex]
-        
-        // Find this session's position in the original sessions array
-        const foundIndex = sessions.findIndex(s => s.id === firstVisibleSession.id)
-        
-        if (foundIndex >= 0) {
-          // Insert at the start of the current page (before the first visible session)
-          actualInsertIndex = foundIndex
-        } else {
-          // If not found (shouldn't happen), insert at the beginning
-          actualInsertIndex = 0
-        }
-      } else {
-        // If current page is beyond available sessions, insert at the end
-        // But find the last session's position in original array
-        const lastFilteredSession = filteredAndSortedSessions[filteredAndSortedSessions.length - 1]
-        const foundIndex = sessions.findIndex(s => s.id === lastFilteredSession.id)
-        if (foundIndex >= 0) {
-          actualInsertIndex = foundIndex + 1
-        }
-      }
-    } else {
-      // No filtered sessions, insert at the beginning
-      actualInsertIndex = 0
-    }
-    
-    // Insert the duplicated session at the calculated position
-    const updatedSessions = [
-      ...sessions.slice(0, actualInsertIndex),
-      duplicatedSession,
-      ...sessions.slice(actualInsertIndex)
-    ]
+    // Insert the duplicated session at the beginning
+    const updatedSessions = [duplicatedSession, ...sessions]
     setSessions(updatedSessions)
+    
+    // Reset to first page to show the new session (since it's at the beginning)
+    setPagination({ ...pagination, pageIndex: 0 })
     
     // Mark this row as duplicated (with dark gray color)
     setDuplicatedRowIds(new Set([...duplicatedRowIds, newId]))
@@ -358,11 +892,76 @@ const ContractDetails = () => {
     return timeString
   }
 
-  const handleCellClick = (sessionId, field, currentValue) => {
-    // Don't allow editing if already editing another cell
+  const handleCellClick = (sessionId, field, currentValue, event) => {
+    // Prevent blur from firing when clicking on another cell
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    
+    // Allow editing if clicking the same cell that's already being edited
+    if (editingCell && editingCell.sessionId === sessionId && editingCell.field === field) {
+      return // Already editing this cell, don't do anything
+    }
+    
+    // If clicking on a different cell while another is being edited, save the current cell first
     if (editingCell && (editingCell.sessionId !== sessionId || editingCell.field !== field)) {
+      // Mark that we're switching cells to prevent blur from interfering
+      isSwitchingCellRef.current = true
+      
+      // Save the current cell immediately before switching
+      const currentSessionId = editingCell.sessionId
+      const currentField = editingCell.field
+      const currentEditValue = editValue
+      
+      // Save immediately without waiting for blur
+      if (currentEditValue.trim() !== '') {
+        let valueToSave = currentEditValue.trim()
+        if (currentField === 'startDate' || currentField === 'endDate') {
+          valueToSave = convertFromDateInputFormat(currentEditValue.trim())
+        } else if (currentField === 'startTime' || currentField === 'endTime') {
+          valueToSave = convertFromTimeInputFormat(currentEditValue.trim())
+        }
+        
+        // Update the session data directly
+        if (currentField === 'startDate') {
+          setSessions(prevSessions => prevSessions.map(session => 
+            session.id === currentSessionId 
+              ? { ...session, startDate: valueToSave, endDate: valueToSave }
+              : session
+          ))
+        } else if (currentField === 'location') {
+          handleLocationSave(currentSessionId, valueToSave)
+        } else if (currentField === 'facility') {
+          handleFacilityChange(currentSessionId, valueToSave)
+        } else {
+          setSessions(prevSessions => prevSessions.map(session => 
+            session.id === currentSessionId 
+              ? { ...session, [currentField]: valueToSave }
+              : session
+          ))
+        }
+      }
+      
+      // Switch to the new cell immediately
+      setEditingCell({ sessionId, field })
+      // Convert date format for date inputs
+      if (field === 'startDate' || field === 'endDate') {
+        setEditValue(convertToDateInputFormat(currentValue))
+      } else if (field === 'startTime' || field === 'endTime') {
+        // Convert time format for time inputs
+        setEditValue(convertToTimeInputFormat(currentValue))
+      } else {
+        setEditValue(currentValue)
+      }
+      
+      // Reset the flag after a brief moment
+      setTimeout(() => {
+        isSwitchingCellRef.current = false
+      }, 100)
       return
     }
+    
     setEditingCell({ sessionId, field })
     // Convert date format for date inputs
     if (field === 'startDate' || field === 'endDate') {
@@ -380,6 +979,16 @@ const ContractDetails = () => {
   }
 
   const handleCellSave = (sessionId, field) => {
+    // For date/time inputs, check if calendar picker is open
+    if (field === 'startDate' || field === 'endDate' || field === 'startTime' || field === 'endTime') {
+      // Check if the active element is still the input (calendar might be open)
+      const activeElement = document.activeElement
+      if (activeElement && activeElement.type === (field.includes('Date') ? 'date' : 'time')) {
+        // Calendar/time picker is likely open, don't save yet
+        return
+      }
+    }
+
     if (editValue.trim() === '') {
       // Don't save empty values, cancel edit instead
       handleCellCancel()
@@ -455,105 +1064,15 @@ const ContractDetails = () => {
     return editingCell && editingCell.sessionId === sessionId && editingCell.field === field
   }
 
-  // Handle sorting
-  const handleSort = (key) => {
-    let direction = 'asc'
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc'
-    }
-    setSortConfig({ key, direction })
-    setCurrentPage(1) // Reset to first page when sorting
-  }
-
   // Handle search
   const handleSearch = (e) => {
-    setSearchTerm(e.target.value)
-    setCurrentPage(1) // Reset to first page when searching
+    setGlobalFilter(e.target.value)
+    setPagination({ ...pagination, pageIndex: 0 }) // Reset to first page when searching
   }
 
   // Handle entries per page change
   const handleEntriesPerPageChange = (e) => {
-    setEntriesPerPage(Number(e.target.value))
-    setCurrentPage(1) // Reset to first page when changing entries per page
-  }
-
-  // Filter and sort sessions
-  const getFilteredAndSortedSessions = () => {
-    let filtered = sessions
-
-    // Apply search filter
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase()
-      filtered = filtered.filter(session =>
-        session.startDate.toLowerCase().includes(searchLower) ||
-        session.endDate.toLowerCase().includes(searchLower) ||
-        session.startTime.toLowerCase().includes(searchLower) ||
-        session.endTime.toLowerCase().includes(searchLower) ||
-        session.location.toLowerCase().includes(searchLower) ||
-        session.facility.toLowerCase().includes(searchLower) ||
-        session.extraFees.toLowerCase().includes(searchLower) ||
-        session.fee.toLowerCase().includes(searchLower) ||
-        session.price.toLowerCase().includes(searchLower)
-      )
-    }
-
-    // Apply sorting
-    if (sortConfig.key) {
-      filtered = [...filtered].sort((a, b) => {
-        let aValue = a[sortConfig.key]
-        let bValue = b[sortConfig.key]
-
-        // Handle date sorting
-        if (sortConfig.key === 'startDate' || sortConfig.key === 'endDate') {
-          aValue = new Date(aValue.split('/').reverse().join('-'))
-          bValue = new Date(bValue.split('/').reverse().join('-'))
-        }
-        // Handle price sorting (remove $ and parse)
-        if (sortConfig.key === 'price') {
-          aValue = parseFloat(aValue.replace('$', ''))
-          bValue = parseFloat(bValue.replace('$', ''))
-        }
-        // Handle boolean sorting
-        if (typeof aValue === 'boolean') {
-          aValue = aValue ? 1 : 0
-          bValue = bValue ? 1 : 0
-        }
-
-        if (aValue < bValue) {
-          return sortConfig.direction === 'asc' ? -1 : 1
-        }
-        if (aValue > bValue) {
-          return sortConfig.direction === 'asc' ? 1 : -1
-        }
-        return 0
-      })
-    }
-
-    return filtered
-  }
-
-  // Get paginated sessions
-  const filteredAndSortedSessions = getFilteredAndSortedSessions()
-  const totalPages = Math.ceil(filteredAndSortedSessions.length / entriesPerPage)
-  const startIndex = (currentPage - 1) * entriesPerPage
-  const endIndex = startIndex + entriesPerPage
-  const paginatedSessions = filteredAndSortedSessions.slice(startIndex, endIndex)
-
-  // Handle pagination
-  const handlePageChange = (page) => {
-    setCurrentPage(page)
-  }
-
-  const handleSelectAll = (e) => {
-    const checked = e.target.checked
-    setSelectAll(checked)
-    const newSelected = new Set(selectedRows)
-    if (checked) {
-      paginatedSessions.forEach(session => newSelected.add(session.id))
-    } else {
-      paginatedSessions.forEach(session => newSelected.delete(session.id))
-    }
-    setSelectedRows(newSelected)
+    setPagination({ ...pagination, pageSize: Number(e.target.value), pageIndex: 0 })
   }
 
   const handleRowSelect = (sessionId) => {
@@ -564,10 +1083,969 @@ const ContractDetails = () => {
       newSelected.add(sessionId)
     }
     setSelectedRows(newSelected)
-    // Update selectAll based on current page selection
-    const allPageSelected = paginatedSessions.every(session => newSelected.has(session.id))
-    setSelectAll(allPageSelected && paginatedSessions.length > 0)
   }
+
+  // Handle edit row
+  const handleEditRow = (sessionId) => {
+    const session = sessions.find(s => s.id === sessionId)
+    if (session) {
+      setEditingSession(session)
+      setIsEditModalOpen(true)
+    }
+  }
+
+  // Handle save edited session
+  const handleSaveEditedSession = (updatedSession) => {
+    setSessions(prevSessions => 
+      prevSessions.map(session => 
+        session.id === updatedSession.id ? updatedSession : session
+      )
+    )
+    // Scroll to the updated row
+    const rowElement = document.querySelector(`tr[data-session-id="${updatedSession.id}"]`)
+    if (rowElement) {
+      rowElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      // Add a temporary highlight class
+      rowElement.classList.add('row-edit-highlight')
+      setTimeout(() => {
+        rowElement.classList.remove('row-edit-highlight')
+      }, 2000)
+    }
+  }
+
+  // Handle delete row
+  const handleDeleteRow = (sessionId) => {
+    const sessionToDelete = sessions.find(s => s.id === sessionId)
+    if (!sessionToDelete) return
+
+    // Store the deleted row and its index for undo
+    const deletedIndex = sessions.findIndex(s => s.id === sessionId)
+    deletedRowRef.current = { ...sessionToDelete }
+    deletedRowIndexRef.current = deletedIndex
+
+    // Show toast notification with restore button
+    const toastId = `delete-${sessionId}`
+    toast.custom(
+      (t) => (
+        <DeleteToast
+          message="Row deleted"
+          onUndo={() => {
+            handleUndoDelete(sessionId, t.id)
+          }}
+          onClose={() => toast.dismiss(t.id)}
+          t={t}
+          duration={4000}
+        />
+      ),
+      {
+        id: toastId,
+        duration: Infinity, // Let our animation control when to close
+        position: 'top-right',
+              }
+    )
+
+    // Delete the row after notification appears (small delay to ensure notification renders first)
+    requestAnimationFrame(() => {
+      deleteTimeoutRef.current = setTimeout(() => {
+        // Only delete if undo hasn't been clicked (check if refs are still set)
+        if (deletedRowRef.current && deletedRowIndexRef.current !== null) {
+          setSessions(prevSessions => prevSessions.filter(session => session.id !== sessionId))
+          
+          // Also remove from selected rows if it was selected
+          setSelectedRows(prevSelected => {
+            const newSelected = new Set(prevSelected)
+            newSelected.delete(sessionId)
+            return newSelected
+          })
+        }
+        deleteTimeoutRef.current = null
+      }, 50)
+    })
+  }
+
+  // Handle undo delete
+  const handleUndoDelete = (sessionId, deleteToastId) => {
+    // Cancel the deletion timeout if it hasn't executed yet
+    if (deleteTimeoutRef.current) {
+      clearTimeout(deleteTimeoutRef.current)
+      deleteTimeoutRef.current = null
+    }
+    
+    if (deletedRowRef.current && deletedRowIndexRef.current !== null) {
+      const restoredRow = deletedRowRef.current
+      const restoredIndex = deletedRowIndexRef.current
+      const restoredId = restoredRow.id
+      
+      // Use functional update to get the latest sessions state
+      setSessions(prevSessions => {
+        // Check if the row already exists in current sessions
+        const rowExists = prevSessions.find(s => s.id === restoredId)
+        
+        if (!rowExists) {
+          // Create a new array and insert the deleted row back at its original position
+          const newSessions = [...prevSessions]
+          newSessions.splice(restoredIndex, 0, restoredRow)
+          
+          // Highlight the restored row
+          setRestoredRowId(restoredId)
+          
+          // Show success toast notification - replaces delete toast by using same ID
+          // Use a small delay to ensure smooth transition
+          setTimeout(() => {
+            toast.custom(
+              (t) => (
+                <SuccessToast
+                  message="Row restored successfully"
+                  onClose={() => toast.dismiss(t.id)}
+                  t={t}
+                  duration={4000}
+                />
+              ),
+              {
+                id: deleteToastId, // Use same ID to replace the delete toast in place
+                duration: Infinity, // Let our animation control when to close
+                position: 'top-right',
+              }
+            )
+          }, 50)
+          
+          // Remove highlight after 3 seconds
+          setTimeout(() => {
+            setRestoredRowId(null)
+          }, 3000)
+          
+          return newSessions
+        }
+        
+        // Row already exists, return unchanged
+        return prevSessions
+      })
+      
+      // Clear the refs
+      deletedRowRef.current = null
+      deletedRowIndexRef.current = null
+    }
+  }
+
+  // Row drag and drop handlers using @dnd-kit
+  const handleRowDragStart = (event) => {
+    setActiveRowId(event.active.id)
+    // Clear sorting when starting drag for smoother experience
+    setSorting([])
+  }
+
+  const handleRowDragEnd = (event) => {
+    const { active, over } = event
+    
+    if (!over || active.id === over.id) {
+      setActiveRowId(null)
+      return
+    }
+
+    // Get current visible rows (after filtering) to understand visual order
+    // Note: We clear sorting on drag start, so rows should be in data order
+    const visibleRows = table.getRowModel().rows.map(row => row.original)
+    const activeIndex = visibleRows.findIndex(s => s.id === active.id)
+    const overIndex = visibleRows.findIndex(s => s.id === over.id)
+
+    if (activeIndex === -1 || overIndex === -1) {
+      setActiveRowId(null)
+      return
+    }
+
+    // Use functional update to ensure we have the latest sessions state
+    setSessions((prevSessions) => {
+      // Find indices in the original data array
+      const oldIndex = prevSessions.findIndex(s => s.id === active.id)
+      const newIndex = prevSessions.findIndex(s => s.id === over.id)
+
+      if (oldIndex === -1 || newIndex === -1) {
+        return prevSessions // Return unchanged if indices not found
+      }
+
+      // Use arrayMove from dnd-kit for smooth reordering
+      return arrayMove(prevSessions, oldIndex, newIndex)
+    })
+    
+    setActiveRowId(null)
+  }
+
+  // Initialize columnOrder state
+  React.useEffect(() => {
+    if (columnOrder.length === 0 && defaultColumnOrder.length > 0) {
+      setColumnOrder(defaultColumnOrder)
+    }
+  }, [defaultColumnOrder])
+
+  // Column drag and drop handlers using @dnd-kit
+  const handleColumnDragStart = (event) => {
+    setActiveColumnId(event.active.id)
+  }
+
+  const handleColumnDragEnd = (event) => {
+    const { active, over } = event
+    
+    if (!over || active.id === over.id) {
+      setActiveColumnId(null)
+      return
+    }
+
+    const newColumnOrder = [...columnOrder]
+    const oldIndex = newColumnOrder.indexOf(active.id)
+    const newIndex = newColumnOrder.indexOf(over.id)
+
+    if (oldIndex === -1 || newIndex === -1) {
+      setActiveColumnId(null)
+      return
+    }
+
+    setColumnOrder(arrayMove(newColumnOrder, oldIndex, newIndex))
+    setActiveColumnId(null)
+  }
+
+  // Define columns for TanStack Table
+  const columns = useMemo(() => [
+    {
+      id: 'expand',
+      header: () => null,
+      cell: ({ row }) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            row.toggleExpanded()
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              e.stopPropagation()
+              row.toggleExpanded()
+            }
+          }}
+          className="expand-button"
+          aria-label={row.getIsExpanded() ? `Collapse row ${row.original.id} details` : `Expand row ${row.original.id} details`}
+          aria-expanded={row.getIsExpanded()}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {row.getIsExpanded() ? (
+            <FaChevronDown style={{ fontSize: '12px', color: '#666' }} aria-hidden="true" />
+          ) : (
+            <FaChevronRight style={{ fontSize: '12px', color: '#666' }} aria-hidden="true" />
+          )}
+        </button>
+      ),
+      enableSorting: false,
+      size: 40,
+    },
+    {
+      id: 'select',
+      header: ({ table }) => {
+        // Check if all rows on current page are selected
+        const currentPageRows = table.getRowModel().rows
+        const allSelected = currentPageRows.length > 0 && 
+          currentPageRows.every(row => selectedRows.has(row.original.id))
+        const someSelected = currentPageRows.some(row => selectedRows.has(row.original.id))
+        
+        return (
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={(el) => {
+              if (el) el.indeterminate = someSelected && !allSelected
+            }}
+            onChange={(e) => {
+              const checked = e.target.checked
+              const newSelected = new Set(selectedRows)
+              const currentPageRows = table.getRowModel().rows
+              
+              if (checked) {
+                // Select all rows on current page
+                currentPageRows.forEach(row => {
+                  newSelected.add(row.original.id)
+                })
+              } else {
+                // Unselect all rows on current page
+                currentPageRows.forEach(row => {
+                  newSelected.delete(row.original.id)
+                })
+              }
+              setSelectedRows(newSelected)
+            }}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={allSelected ? "Unselect all rows on this page" : "Select all rows on this page"}
+            title={allSelected ? "Unselect all rows on this page" : "Select all rows on this page"}
+          />
+        )
+      },
+      cell: ({ row }) => (
+        <input
+          type="checkbox"
+          checked={selectedRows.has(row.original.id)}
+          onChange={() => handleRowSelect(row.original.id)}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={selectedRows.has(row.original.id) ? `Unselect row ${row.original.id}` : `Select row ${row.original.id}`}
+        />
+      ),
+      enableSorting: false,
+    },
+    {
+      accessorKey: 'startDate',
+      header: ({ column, table }) => {
+        const isSorted = column.getIsSorted()
+        return (
+          <div className="column-header-with-filter">
+            <div
+              className="sortable-header"
+              onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            >
+              Start Date
+              {isSorted === 'asc' && <FaChevronUp className="sort-icon-active" />}
+              {isSorted === 'desc' && <FaChevronDown className="sort-icon-active" />}
+              {!isSorted && <FaChevronUp className="sort-icon-inactive" />}
+            </div>
+            <ColumnFilterDropdown 
+              column={column} 
+              table={table} 
+              accessorKey="startDate"
+              sessions={sessions}
+              openFilterId={openFilterId}
+              setOpenFilterId={setOpenFilterId}
+            />
+          </div>
+        )
+      },
+      filterFn: (row, columnId, filterValue) => {
+        if (!filterValue || filterValue.length === 0) return true
+        const cellValue = String(row.getValue(columnId))
+        return filterValue.includes(cellValue)
+      },
+      cell: ({ row }) => {
+        const session = row.original
+        return (
+          <div
+            className="editable-cell"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              handleCellClick(session.id, 'startDate', session.startDate, e)
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+            }}
+            style={{ position: 'relative' }}
+          >
+            {isEditing(session.id, 'startDate') ? (
+              <input
+                type="date"
+                className="inline-edit-input date-input"
+                value={editValue}
+                onChange={handleCellChange}
+                onBlur={(e) => {
+                  // Don't save if we're switching to another cell
+                  if (isSwitchingCellRef.current) {
+                    return
+                  }
+                  // Delay to allow calendar picker to be clicked
+                  setTimeout(() => {
+                    if (!isSwitchingCellRef.current) {
+                      handleCellSave(session.id, 'startDate')
+                    }
+                  }, 200)
+                }}
+                onKeyDown={(e) => handleCellKeyDown(e, session.id, 'startDate')}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                autoFocus
+              />
+            ) : (
+              <span onClick={(e) => e.stopPropagation()}>{session.startDate}</span>
+            )}
+          </div>
+        )
+      },
+      sortingFn: (rowA, rowB) => {
+        const aValue = new Date(rowA.original.startDate.split('/').reverse().join('-'))
+        const bValue = new Date(rowB.original.startDate.split('/').reverse().join('-'))
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0
+      },
+    },
+    {
+      accessorKey: 'endDate',
+      header: ({ column, table }) => {
+        const isSorted = column.getIsSorted()
+        return (
+          <div className="column-header-with-filter">
+            <div
+              className="sortable-header"
+              onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            >
+              End Date
+              {isSorted === 'asc' && <FaChevronUp className="sort-icon-active" />}
+              {isSorted === 'desc' && <FaChevronDown className="sort-icon-active" />}
+              {!isSorted && <FaChevronUp className="sort-icon-inactive" />}
+            </div>
+            <ColumnFilterDropdown 
+              column={column} 
+              table={table} 
+              accessorKey="endDate"
+              sessions={sessions}
+              openFilterId={openFilterId}
+              setOpenFilterId={setOpenFilterId}
+            />
+          </div>
+        )
+      },
+      filterFn: (row, columnId, filterValue) => {
+        if (!filterValue || filterValue.length === 0) return true
+        const cellValue = String(row.getValue(columnId))
+        return filterValue.includes(cellValue)
+      },
+      cell: ({ row }) => {
+        const session = row.original
+        return (
+          <div
+            className="editable-cell"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              handleCellClick(session.id, 'endDate', session.endDate, e)
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+            }}
+            style={{ position: 'relative' }}
+          >
+            {isEditing(session.id, 'endDate') ? (
+              <input
+                type="date"
+                className="inline-edit-input date-input"
+                value={editValue}
+                onChange={handleCellChange}
+                onBlur={(e) => {
+                  // Don't save if we're switching to another cell
+                  if (isSwitchingCellRef.current) {
+                    return
+                  }
+                  // Delay to allow calendar picker to be clicked
+                  setTimeout(() => {
+                    if (!isSwitchingCellRef.current) {
+                      handleCellSave(session.id, 'endDate')
+                    }
+                  }, 200)
+                }}
+                onKeyDown={(e) => handleCellKeyDown(e, session.id, 'endDate')}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                autoFocus
+              />
+            ) : (
+              <span onClick={(e) => e.stopPropagation()}>{session.endDate}</span>
+            )}
+          </div>
+        )
+      },
+      sortingFn: (rowA, rowB) => {
+        const aValue = new Date(rowA.original.endDate.split('/').reverse().join('-'))
+        const bValue = new Date(rowB.original.endDate.split('/').reverse().join('-'))
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0
+      },
+    },
+    {
+      accessorKey: 'startTime',
+      header: ({ column, table }) => {
+        const isSorted = column.getIsSorted()
+        return (
+          <div className="column-header-with-filter">
+            <div
+              className="sortable-header"
+              onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            >
+              Start Time
+              {isSorted === 'asc' && <FaChevronUp className="sort-icon-active" />}
+              {isSorted === 'desc' && <FaChevronDown className="sort-icon-active" />}
+              {!isSorted && <FaChevronUp className="sort-icon-inactive" />}
+            </div>
+            <ColumnFilterDropdown 
+              column={column} 
+              table={table} 
+              accessorKey="startTime"
+              sessions={sessions}
+              openFilterId={openFilterId}
+              setOpenFilterId={setOpenFilterId}
+            />
+          </div>
+        )
+      },
+      filterFn: (row, columnId, filterValue) => {
+        if (!filterValue || filterValue.length === 0) return true
+        const cellValue = String(row.getValue(columnId))
+        return filterValue.includes(cellValue)
+      },
+      cell: ({ row }) => {
+        const session = row.original
+        return (
+          <div
+            className="editable-cell"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              handleCellClick(session.id, 'startTime', session.startTime, e)
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+            }}
+            style={{ position: 'relative' }}
+          >
+            {isEditing(session.id, 'startTime') ? (
+              <input
+                type="time"
+                className="inline-edit-input time-input"
+                value={editValue}
+                onChange={handleCellChange}
+                onBlur={(e) => {
+                  // Don't save if we're switching to another cell
+                  if (isSwitchingCellRef.current) {
+                    return
+                  }
+                  // Delay to allow time picker to be clicked
+                  setTimeout(() => {
+                    if (!isSwitchingCellRef.current) {
+                      handleCellSave(session.id, 'startTime')
+                    }
+                  }, 200)
+                }}
+                onKeyDown={(e) => handleCellKeyDown(e, session.id, 'startTime')}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                autoFocus
+              />
+            ) : (
+              <span onClick={(e) => e.stopPropagation()}>{session.startTime}</span>
+            )}
+          </div>
+        )
+      },
+      sortingFn: (rowA, rowB) => {
+        // Convert time to comparable format (HH:MM AM/PM)
+        const convertTime = (timeStr) => {
+          if (!timeStr) return 0
+          const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i)
+          if (!match) return 0
+          let hours = parseInt(match[1], 10)
+          const minutes = parseInt(match[2], 10)
+          const period = match[3].toUpperCase()
+          if (period === 'PM' && hours !== 12) hours += 12
+          if (period === 'AM' && hours === 12) hours = 0
+          return hours * 60 + minutes
+        }
+        const aValue = convertTime(rowA.original.startTime)
+        const bValue = convertTime(rowB.original.startTime)
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0
+      },
+    },
+    {
+      accessorKey: 'endTime',
+      header: ({ column, table }) => {
+        const isSorted = column.getIsSorted()
+        return (
+          <div className="column-header-with-filter">
+            <div
+              className="sortable-header"
+              onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            >
+              End Time
+              {isSorted === 'asc' && <FaChevronUp className="sort-icon-active" />}
+              {isSorted === 'desc' && <FaChevronDown className="sort-icon-active" />}
+              {!isSorted && <FaChevronUp className="sort-icon-inactive" />}
+            </div>
+            <ColumnFilterDropdown 
+              column={column} 
+              table={table} 
+              accessorKey="endTime"
+              sessions={sessions}
+              openFilterId={openFilterId}
+              setOpenFilterId={setOpenFilterId}
+            />
+          </div>
+        )
+      },
+      filterFn: (row, columnId, filterValue) => {
+        if (!filterValue || filterValue.length === 0) return true
+        const cellValue = String(row.getValue(columnId))
+        return filterValue.includes(cellValue)
+      },
+      cell: ({ row }) => {
+        const session = row.original
+        return (
+          <div
+            className="editable-cell"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              handleCellClick(session.id, 'endTime', session.endTime, e)
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+            }}
+            style={{ position: 'relative' }}
+          >
+            {isEditing(session.id, 'endTime') ? (
+              <input
+                type="time"
+                className="inline-edit-input time-input"
+                value={editValue}
+                onChange={handleCellChange}
+                onBlur={(e) => {
+                  // Don't save if we're switching to another cell
+                  if (isSwitchingCellRef.current) {
+                    return
+                  }
+                  // Delay to allow time picker to be clicked
+                  setTimeout(() => {
+                    if (!isSwitchingCellRef.current) {
+                      handleCellSave(session.id, 'endTime')
+                    }
+                  }, 200)
+                }}
+                onKeyDown={(e) => handleCellKeyDown(e, session.id, 'endTime')}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                autoFocus
+              />
+            ) : (
+              <span onClick={(e) => e.stopPropagation()}>{session.endTime}</span>
+            )}
+          </div>
+        )
+      },
+      sortingFn: (rowA, rowB) => {
+        // Convert time to comparable format (HH:MM AM/PM)
+        const convertTime = (timeStr) => {
+          if (!timeStr) return 0
+          const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i)
+          if (!match) return 0
+          let hours = parseInt(match[1], 10)
+          const minutes = parseInt(match[2], 10)
+          const period = match[3].toUpperCase()
+          if (period === 'PM' && hours !== 12) hours += 12
+          if (period === 'AM' && hours === 12) hours = 0
+          return hours * 60 + minutes
+        }
+        const aValue = convertTime(rowA.original.endTime)
+        const bValue = convertTime(rowB.original.endTime)
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0
+      },
+    },
+    {
+      accessorKey: 'location',
+      header: ({ column, table }) => {
+        const isSorted = column.getIsSorted()
+        return (
+          <div className="column-header-with-filter">
+            <div
+              className="sortable-header"
+              onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            >
+              Location
+              {isSorted === 'asc' && <FaChevronUp className="sort-icon-active" />}
+              {isSorted === 'desc' && <FaChevronDown className="sort-icon-active" />}
+              {!isSorted && <FaChevronUp className="sort-icon-inactive" />}
+            </div>
+            <ColumnFilterDropdown 
+              column={column} 
+              table={table} 
+              accessorKey="location"
+              sessions={sessions}
+              openFilterId={openFilterId}
+              setOpenFilterId={setOpenFilterId}
+            />
+          </div>
+        )
+      },
+      filterFn: (row, columnId, filterValue) => {
+        if (!filterValue || filterValue.length === 0) return true
+        const cellValue = String(row.getValue(columnId))
+        return filterValue.includes(cellValue)
+      },
+      cell: ({ row }) => {
+        const session = row.original
+        return (
+          <div
+            className="editable-cell"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              handleCellClick(session.id, 'location', session.location, e)
+            }}
+            onClick={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+            }}
+            style={{ position: 'relative' }}
+          >
+            {isEditing(session.id, 'location') ? (
+              <input
+                type="text"
+                className="inline-edit-input"
+                value={editValue}
+                onChange={handleCellChange}
+                onBlur={() => {
+                  // Don't save if we're switching to another cell
+                  if (!isSwitchingCellRef.current) {
+                    handleCellSave(session.id, 'location')
+                  }
+                }}
+                onKeyDown={(e) => handleCellKeyDown(e, session.id, 'location')}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                autoFocus
+              />
+            ) : (
+              <span onClick={(e) => e.stopPropagation()}>{session.location}</span>
+            )}
+          </div>
+        )
+      },
+      sortingFn: (rowA, rowB) => {
+        const aValue = String(rowA.original.location || '').toLowerCase()
+        const bValue = String(rowB.original.location || '').toLowerCase()
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0
+      },
+    },
+    {
+      accessorKey: 'facility',
+      header: ({ column, table }) => {
+        return (
+          <div className="column-header-with-filter">
+            <div className="sortable-header">Facility</div>
+            <ColumnFilterDropdown 
+              column={column} 
+              table={table} 
+              accessorKey="facility"
+              sessions={sessions}
+              openFilterId={openFilterId}
+              setOpenFilterId={setOpenFilterId}
+            />
+          </div>
+        )
+      },
+      filterFn: (row, columnId, filterValue) => {
+        if (!filterValue || filterValue.length === 0) return true
+        const cellValue = String(row.getValue(columnId))
+        return filterValue.includes(cellValue)
+      },
+      cell: ({ row }) => {
+        const session = row.original
+        return (
+          <select
+            className="facility-dropdown"
+            value={session.facility}
+            onChange={(e) => {
+              handleFacilityChange(session.id, e.target.value)
+            }}
+          >
+            {getAvailableFacilities(session.location).map((facility) => (
+              <option key={facility} value={facility}>
+                {facility}
+              </option>
+            ))}
+          </select>
+        )
+      },
+      enableSorting: false,
+    },
+    {
+      accessorKey: 'extraFees',
+      header: 'Extra Fees',
+      cell: ({ row }) => (
+        <span className="badge">
+          {row.original.extraFees}
+          <span className="badge-count">2</span>
+        </span>
+      ),
+      enableSorting: false,
+    },
+    {
+      accessorKey: 'fee',
+      header: 'Fee',
+      cell: ({ row }) => (
+        <div className="non-editable-cell">
+          <span>{row.original.fee}</span>
+        </div>
+      ),
+      enableSorting: false,
+    },
+    {
+      accessorKey: 'price',
+      header: ({ column }) => {
+        const isSorted = column.getIsSorted()
+        return (
+          <div
+            className="sortable-header"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Price
+            {isSorted === 'asc' && <FaChevronUp className="sort-icon-active" />}
+            {isSorted === 'desc' && <FaChevronDown className="sort-icon-active" />}
+            {!isSorted && <FaChevronUp className="sort-icon-inactive" />}
+          </div>
+        )
+      },
+      cell: ({ row }) => (
+        <div className="non-editable-cell">
+          <span>{row.original.price}</span>
+        </div>
+      ),
+      sortingFn: (rowA, rowB) => {
+        const aValue = parseFloat(String(rowA.original.price).replace('$', '')) || 0
+        const bValue = parseFloat(String(rowB.original.price).replace('$', '')) || 0
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0
+      },
+    },
+    {
+      accessorKey: 'include',
+      header: 'Include',
+      cell: ({ row }) => (
+        <button
+          type="button"
+          className={row.original.include ? "toggle-on" : "toggle-off"}
+          onClick={() => handleIncludeToggle(row.original.id)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              handleIncludeToggle(row.original.id)
+            }
+          }}
+          aria-label={row.original.include ? `Exclude row ${row.original.id}` : `Include row ${row.original.id}`}
+          aria-pressed={row.original.include}
+          style={{ 
+            background: 'none', 
+            border: 'none', 
+            cursor: 'pointer',
+            padding: 0,
+            display: 'inline-flex',
+            alignItems: 'center'
+          }}
+        >
+          {row.original.include ? (
+            <FaToggleOn aria-hidden="true" />
+          ) : (
+            <FaToggleOff aria-hidden="true" />
+          )}
+        </button>
+      ),
+      enableSorting: false,
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      cell: ({ row }) => (
+        <div className="row-actions" role="group" aria-label={`Actions for row ${row.original.id}`}>
+          <button
+            type="button"
+            className="action-btn edit-btn"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleEditRow(row.original.id)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                handleEditRow(row.original.id)
+              }
+            }}
+            aria-label={`Edit row ${row.original.id}`}
+            title="Edit row"
+          >
+            <FaEdit aria-hidden="true" />
+            <span className="sr-only">Edit</span>
+          </button>
+          <button
+            type="button"
+            className="action-btn delete-btn"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              handleDeleteRow(row.original.id)
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                handleDeleteRow(row.original.id)
+              }
+            }}
+            aria-label={`Delete row ${row.original.id}`}
+            title="Delete row"
+          >
+            <FaTrash aria-hidden="true" />
+            <span className="sr-only">Delete</span>
+          </button>
+        </div>
+      ),
+      enableSorting: false,
+    },
+  ], [sessions, editingCell, editValue, selectedRows, handleCellClick, handleCellChange, handleCellSave, handleCellKeyDown, isEditing, handleFacilityChange, getAvailableFacilities, handleIncludeToggle, handleEditRow, handleDeleteRow])
+
+  // Global filter function
+  const globalFilterFn = (row, columnId, filterValue) => {
+    const search = filterValue.toLowerCase()
+    const session = row.original
+    return (
+      String(session.startDate || '').toLowerCase().includes(search) ||
+      String(session.endDate || '').toLowerCase().includes(search) ||
+      String(session.startTime || '').toLowerCase().includes(search) ||
+      String(session.endTime || '').toLowerCase().includes(search) ||
+      String(session.location || '').toLowerCase().includes(search) ||
+      String(session.facility || '').toLowerCase().includes(search) ||
+      String(session.extraFees || '').toLowerCase().includes(search) ||
+      String(session.fee || '').toLowerCase().includes(search) ||
+      String(session.price || '').toLowerCase().includes(search)
+    )
+  }
+
+  // Create table instance
+  const table = useReactTable({
+    data: sessions,
+    columns,
+    state: {
+      sorting,
+      globalFilter,
+      columnFilters,
+      pagination,
+      expanded,
+      columnOrder: columnOrder.length > 0 ? columnOrder : undefined,
+    },
+    onSortingChange: setSorting,
+    onGlobalFilterChange: setGlobalFilter,
+    onColumnFiltersChange: setColumnFilters,
+    onPaginationChange: setPagination,
+    onExpandedChange: setExpanded,
+    onColumnOrderChange: setColumnOrder,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
+    globalFilterFn,
+    enableRowSelection: false, // We handle selection manually
+    getRowCanExpand: () => true, // All rows can be expanded
+  })
 
   const exportToCSV = () => {
     if (selectedRows.size === 0) {
@@ -688,45 +2166,25 @@ const ContractDetails = () => {
 
   return (
     <div className="contract-details-page">
-      {/* Contract Sent Notification */}
-      {showNotification && (
-        <div className="contract-notification">
-          <FaCheck className="notification-icon" />
-          <span className="notification-text">Contract Sent</span>
-          <button className="notification-close" onClick={() => setShowNotification(false)}>
-            <FaTimes />
-          </button>
-        </div>
-      )}
 
-      {/* Contract Firmed Notification */}
-      {showFirmNotification && (
-        <div className="contract-notification">
-          <FaCheck className="notification-icon" />
-          <span className="notification-text">Contract Firmed</span>
-          <button className="notification-close" onClick={() => setShowFirmNotification(false)}>
-            <FaTimes />
-          </button>
-        </div>
-      )}
-
+     
       <div className="contract-header">
-        <button className="back-button">
-          <FaArrowLeft />
+        <button 
+          type="button"
+          className="back-button"
+          aria-label="Go back to previous page"
+        >
+          <FaArrowLeft aria-hidden="true" />
           <span>Back</span>
         </button>
         <div className="contract-title-section">
-          <h1 className="contract-title">Contract ABC</h1>
-          <div className="contract-id">
-            <span>#1234567890</span>
-            <FaCopy className="copy-icon" />
-          </div>
+          <h1 className="contract-title">Contract Details</h1>
+          <p className="contract-subtitle">Advanced Reservation Sessions</p>
         </div>
       </div>
 
       <div className="contract-content">
         <div className="contract-details-card">
-          <h2 className="section-title">Contract Details</h2>
           <div className="details-grid">
             <div className="detail-card">
               <div className="detail-header">
@@ -815,16 +2273,34 @@ const ContractDetails = () => {
             </div>
           </div>
 
-          <div className="tabs-container">
+          <div className="tabs-container" role="tablist" aria-label="Contract sections">
             {tabs.map((tab) => {
               const Icon = tab.icon
               return (
                 <button
                   key={tab.id}
+                  type="button"
                   className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
                   onClick={() => setActiveTab(tab.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setActiveTab(tab.id)
+                    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                      e.preventDefault()
+                      const currentIndex = tabs.findIndex(t => t.id === tab.id)
+                      const nextIndex = e.key === 'ArrowRight' 
+                        ? (currentIndex + 1) % tabs.length
+                        : (currentIndex - 1 + tabs.length) % tabs.length
+                      setActiveTab(tabs[nextIndex].id)
+                      document.querySelectorAll('.tab-button')[nextIndex]?.focus()
+                    }
+                  }}
+                  aria-label={`${tab.label} tab`}
+                  aria-selected={activeTab === tab.id}
+                  role="tab"
                 >
-                  <Icon className="tab-icon" />
+                  <Icon className="tab-icon" aria-hidden="true" />
                   <span>{tab.label}</span>
                 </button>
               )
@@ -839,20 +2315,31 @@ const ContractDetails = () => {
                     className="bulk-update-btn"
                     disabled={selectedRows.size === 0}
                   >
-                    Bulk Update
+                    <FaPlus />
+                    <span>Bulk Update</span>
                   </button>
                   <div className="success-message">
                     <FaCheck className="check-icon" />
-                    <span>{sessions.length} session{sessions.length !== 1 ? 's' : ''} created</span>
+                    <span>{sessions.length} sessions created</span>
                   </div>
                 </div>
                 <div className="sessions-right">
-                  <button className="export-btn" onClick={exportToCSV}>
-                    <FaFileExport className="export-icon" />
+                  <button 
+                    type="button"
+                    className="export-btn export-csv-btn" 
+                    onClick={exportToCSV}
+                    aria-label="Export selected sessions to CSV"
+                  >
+                    <FaFileExport className="export-icon" aria-hidden="true" />
                     <span>Export CSV</span>
                   </button>
-                  <button className="export-btn" onClick={exportToPDF}>
-                    <FaFileExport className="export-icon" />
+                  <button 
+                    type="button"
+                    className="export-btn export-pdf-btn" 
+                    onClick={exportToPDF}
+                    aria-label="Export selected sessions to PDF"
+                  >
+                    <FaFileAlt className="export-icon" aria-hidden="true" />
                     <span>Export PDF</span>
                   </button>
                 </div>
@@ -863,333 +2350,258 @@ const ContractDetails = () => {
                 <div className="search-container">
                   <FaSearch className="search-icon" />
                   <input
+                    id="search-sessions"
                     type="text"
                     className="search-input"
-                    placeholder="Search sessions..."
-                    value={searchTerm}
+                    placeholder="Q Search sessions..."
+                    value={globalFilter}
                     onChange={handleSearch}
+                    aria-label="Search sessions"
                   />
                 </div>
-                <div className="entries-per-page-container">
-                  <label htmlFor="entries-per-page">Show</label>
-                  <select
-                    id="entries-per-page"
-                    className="entries-per-page-select"
-                    value={entriesPerPage}
-                    onChange={handleEntriesPerPageChange}
-                  >
-                    <option value={5}>5</option>
-                    <option value={10}>10</option>
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                  </select>
-                  <span>entries</span>
+                <div className="table-controls-right">
+                  <div className="entries-per-page-container">
+                    <label htmlFor="entries-per-page">Show</label>
+                    <select
+                      id="entries-per-page"
+                      className="entries-per-page-select"
+                      value={pagination.pageSize}
+                      onChange={handleEntriesPerPageChange}
+                    >
+                      <option value={5}>5</option>
+                      <option value={10}>10</option>
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                    <span>entries</span>
+                  </div>
+                  <div className="entries-info" role="status" aria-live="polite" aria-atomic="true">
+                    Showing {table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1} to{' '}
+                    {Math.min(
+                      (table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize,
+                      table.getFilteredRowModel().rows.length
+                    )}{' '}
+                    of {table.getFilteredRowModel().rows.length} entries
+                  </div>
+                  {(hasOrderChanged || hasColumnOrderChanged) && (
+                    <button
+                      type="button"
+                      className="reset-order-btn"
+                      onClick={handleResetOrder}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          handleResetOrder()
+                        }
+                      }}
+                      aria-label="Reset table to original row and column order"
+                      title="Reset to original order"
+                    >
+                      <FaUndo className="reset-icon" aria-hidden="true" />
+                      <span>Reset Order</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
               <div className="sessions-table-container">
-                <table className="sessions-table">
-                  <thead>
-                    <tr>
-                      <th>
-                        <input 
-                          type="checkbox" 
-                          checked={paginatedSessions.length > 0 && paginatedSessions.every(session => selectedRows.has(session.id))}
-                          onChange={handleSelectAll}
-                        />
-                      </th>
-                      <th 
-                        className="sortable-header"
-                        onClick={() => handleSort('startDate')}
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragStart={(event) => {
+                    if (event.active.data.current?.type === 'column') {
+                      handleColumnDragStart(event)
+                    } else {
+                      handleRowDragStart(event)
+                    }
+                  }}
+                  onDragEnd={(event) => {
+                    if (event.active.data.current?.type === 'column') {
+                      handleColumnDragEnd(event)
+                    } else {
+                      handleRowDragEnd(event)
+                    }
+                  }}
+                >
+                  <table className="sessions-table" role="table" aria-label="Sessions table">
+                    <thead role="rowgroup">
+                      {table.getHeaderGroups().map(headerGroup => {
+                        const currentColumnOrder = columnOrder.length > 0 ? columnOrder : defaultColumnOrder
+                        // Sort headers based on columnOrder
+                        const sortedHeaders = [...headerGroup.headers].sort((a, b) => {
+                          const aIndex = currentColumnOrder.indexOf(a.column.id)
+                          const bIndex = currentColumnOrder.indexOf(b.column.id)
+                          if (aIndex === -1) return 1
+                          if (bIndex === -1) return -1
+                          return aIndex - bIndex
+                        })
+                        return (
+                          <tr key={headerGroup.id}>
+                            <SortableContext
+                              items={currentColumnOrder}
+                              strategy={horizontalListSortingStrategy}
+                            >
+                              {sortedHeaders.map(header => {
+                                const columnId = header.column.id
+                                return (
+                                  <SortableColumnHeader
+                                    key={header.id}
+                                    header={header}
+                                    columnId={columnId}
+                                    activeColumnId={activeColumnId}
+                                    table={table}
+                                  />
+                                )
+                              })}
+                            </SortableContext>
+                          </tr>
+                        )
+                      })}
+                    </thead>
+                    <tbody>
+                      <SortableContext
+                        items={table.getRowModel().rows.map(row => row.original.id)}
+                        strategy={verticalListSortingStrategy}
                       >
-                        Start Date
-                        {sortConfig.key === 'startDate' && (
-                          sortConfig.direction === 'asc' ? <FaChevronUp className="sort-icon-active" /> : <FaChevronDown className="sort-icon-active" />
-                        )}
-                        {sortConfig.key !== 'startDate' && <FaChevronUp className="sort-icon-inactive" />}
-                      </th>
-                      <th 
-                        className="sortable-header"
-                        onClick={() => handleSort('endDate')}
-                      >
-                        End Date
-                        {sortConfig.key === 'endDate' && (
-                          sortConfig.direction === 'asc' ? <FaChevronUp className="sort-icon-active" /> : <FaChevronDown className="sort-icon-active" />
-                        )}
-                        {sortConfig.key !== 'endDate' && <FaChevronUp className="sort-icon-inactive" />}
-                      </th>
-                      <th 
-                        className="sortable-header"
-                        onClick={() => handleSort('startTime')}
-                      >
-                        Start Time
-                        {sortConfig.key === 'startTime' && (
-                          sortConfig.direction === 'asc' ? <FaChevronUp className="sort-icon-active" /> : <FaChevronDown className="sort-icon-active" />
-                        )}
-                        {sortConfig.key !== 'startTime' && <FaChevronUp className="sort-icon-inactive" />}
-                      </th>
-                      <th 
-                        className="sortable-header"
-                        onClick={() => handleSort('endTime')}
-                      >
-                        End Time
-                        {sortConfig.key === 'endTime' && (
-                          sortConfig.direction === 'asc' ? <FaChevronUp className="sort-icon-active" /> : <FaChevronDown className="sort-icon-active" />
-                        )}
-                        {sortConfig.key !== 'endTime' && <FaChevronUp className="sort-icon-inactive" />}
-                      </th>
-                      <th 
-                        className="sortable-header"
-                        onClick={() => handleSort('location')}
-                      >
-                        Location
-                        {sortConfig.key === 'location' && (
-                          sortConfig.direction === 'asc' ? <FaChevronUp className="sort-icon-active" /> : <FaChevronDown className="sort-icon-active" />
-                        )}
-                        {sortConfig.key !== 'location' && <FaChevronUp className="sort-icon-inactive" />}
-                      </th>
-                      <th>Facility</th>
-                      <th>Extra Fees</th>
-                      <th 
-                        className="sortable-header"
-                        onClick={() => handleSort('fee')}
-                      >
-                        Fee
-                        {sortConfig.key === 'fee' && (
-                          sortConfig.direction === 'asc' ? <FaChevronUp className="sort-icon-active" /> : <FaChevronDown className="sort-icon-active" />
-                        )}
-                        {sortConfig.key !== 'fee' && <FaChevronUp className="sort-icon-inactive" />}
-                      </th>
-                      <th 
-                        className="sortable-header"
-                        onClick={() => handleSort('price')}
-                      >
-                        Price
-                        {sortConfig.key === 'price' && (
-                          sortConfig.direction === 'asc' ? <FaChevronUp className="sort-icon-active" /> : <FaChevronDown className="sort-icon-active" />
-                        )}
-                        {sortConfig.key !== 'price' && <FaChevronUp className="sort-icon-inactive" />}
-                      </th>
-                      <th 
-                        className="sortable-header"
-                        onClick={() => handleSort('include')}
-                      >
-                        Include
-                        {sortConfig.key === 'include' && (
-                          sortConfig.direction === 'asc' ? <FaChevronUp className="sort-icon-active" /> : <FaChevronDown className="sort-icon-active" />
-                        )}
-                        {sortConfig.key !== 'include' && <FaChevronUp className="sort-icon-inactive" />}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedSessions.map((session) => (
-                      <tr 
-                        key={session.id} 
-                        data-session-id={session.id}
-                        className={`${newRowIds.has(session.id) ? 'new-row' : ''} ${duplicatedRowIds.has(session.id) ? 'duplicated-row' : ''}`}
-                      >
-                        <td>
-                          <input 
-                            type="checkbox" 
-                            checked={selectedRows.has(session.id)}
-                            onChange={() => handleRowSelect(session.id)}
-                          />
-                        </td>
-                        <td 
-                          className="editable-cell"
-                          onClick={() => handleCellClick(session.id, 'startDate', session.startDate)}
-                          style={{ position: 'relative' }}
-                        >
-                          {isEditing(session.id, 'startDate') ? (
-                            <input
-                              type="date"
-                              className="inline-edit-input date-input"
-                              value={editValue}
-                              onChange={handleCellChange}
-                              onBlur={() => handleCellSave(session.id, 'startDate')}
-                              onKeyDown={(e) => handleCellKeyDown(e, session.id, 'startDate')}
-                              autoFocus
+                        {table.getRowModel().rows.map(row => {
+                          const session = row.original
+                          return (
+                            <SortableRow
+                              key={row.id}
+                              row={row}
+                              session={session}
+                              table={table}
+                              newRowIds={newRowIds}
+                              duplicatedRowIds={duplicatedRowIds}
+                              activeRowId={activeRowId}
+                              restoredRowId={restoredRowId}
+                              columnOrder={columnOrder}
+                              defaultColumnOrder={defaultColumnOrder}
+                              selectedRows={selectedRows}
+                              handleRowSelect={handleRowSelect}
+                              editingCell={editingCell}
+                              editValue={editValue}
+                              handleCellClick={handleCellClick}
+                              handleCellChange={handleCellChange}
+                              handleCellSave={handleCellSave}
+                              handleCellKeyDown={handleCellKeyDown}
+                              isEditing={isEditing}
+                              handleFacilityChange={handleFacilityChange}
+                              getAvailableFacilities={getAvailableFacilities}
+                              handleIncludeToggle={handleIncludeToggle}
+                              handleEditRow={handleEditRow}
+                              handleDeleteRow={handleDeleteRow}
                             />
-                          ) : (
-                            <span>{session.startDate}</span>
-                          )}
-                        </td>
-                        <td 
-                          className="editable-cell"
-                          onClick={() => handleCellClick(session.id, 'endDate', session.endDate)}
-                          style={{ position: 'relative' }}
-                        >
-                          {isEditing(session.id, 'endDate') ? (
-                            <input
-                              type="date"
-                              className="inline-edit-input date-input"
-                              value={editValue}
-                              onChange={handleCellChange}
-                              onBlur={() => handleCellSave(session.id, 'endDate')}
-                              onKeyDown={(e) => handleCellKeyDown(e, session.id, 'endDate')}
-                              autoFocus
-                            />
-                          ) : (
-                            <span>{session.endDate}</span>
-                          )}
-                        </td>
-                        <td 
-                          className="editable-cell"
-                          onClick={() => handleCellClick(session.id, 'startTime', session.startTime)}
-                          style={{ position: 'relative' }}
-                        >
-                          {isEditing(session.id, 'startTime') ? (
-                            <input
-                              type="time"
-                              className="inline-edit-input time-input"
-                              value={editValue}
-                              onChange={handleCellChange}
-                              onBlur={() => handleCellSave(session.id, 'startTime')}
-                              onKeyDown={(e) => handleCellKeyDown(e, session.id, 'startTime')}
-                              autoFocus
-                            />
-                          ) : (
-                            <span>{session.startTime}</span>
-                          )}
-                        </td>
-                        <td 
-                          className="editable-cell"
-                          onClick={() => handleCellClick(session.id, 'endTime', session.endTime)}
-                          style={{ position: 'relative' }}
-                        >
-                          {isEditing(session.id, 'endTime') ? (
-                            <input
-                              type="time"
-                              className="inline-edit-input time-input"
-                              value={editValue}
-                              onChange={handleCellChange}
-                              onBlur={() => handleCellSave(session.id, 'endTime')}
-                              onKeyDown={(e) => handleCellKeyDown(e, session.id, 'endTime')}
-                              autoFocus
-                            />
-                          ) : (
-                            <span>{session.endTime}</span>
-                          )}
-                        </td>
-                        <td 
-                          className="editable-cell"
-                          onClick={() => handleCellClick(session.id, 'location', session.location)}
-                          style={{ position: 'relative' }}
-                        >
-                          {isEditing(session.id, 'location') ? (
-                            <input
-                              type="text"
-                              className="inline-edit-input"
-                              value={editValue}
-                              onChange={handleCellChange}
-                              onBlur={() => handleCellSave(session.id, 'location')}
-                              onKeyDown={(e) => handleCellKeyDown(e, session.id, 'location')}
-                              autoFocus
-                            />
-                          ) : (
-                            <span>{session.location}</span>
-                          )}
-                        </td>
-                        <td>
-                          <select
-                            className="facility-dropdown"
-                            value={session.facility}
-                            onChange={(e) => {
-                              handleFacilityChange(session.id, e.target.value)
-                            }}
-                          >
-                            {getAvailableFacilities(session.location).map((facility) => (
-                              <option key={facility} value={facility}>
-                                {facility}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <span className="badge">
-                            {session.extraFees}
-                            <span className="badge-count">2</span>
-                          </span>
-                        </td>
-                        <td className="non-editable-cell">
-                          <span>{session.fee}</span>
-                        </td>
-                        <td className="non-editable-cell">
-                          <span>{session.price}</span>
-                        </td>
-                        <td>
-                          {session.include ? (
-                            <FaToggleOn 
-                              className="toggle-on" 
-                              onClick={() => handleIncludeToggle(session.id)}
-                              style={{ cursor: 'pointer' }}
-                            />
-                          ) : (
-                            <FaToggleOff 
-                              className="toggle-off" 
-                              onClick={() => handleIncludeToggle(session.id)}
-                              style={{ cursor: 'pointer' }}
-                            />
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          )
+                        })}
+                      </SortableContext>
+                    </tbody>
+                  </table>
+                  <DragOverlay>
+                    {activeRowId ? (
+                      <table style={{ opacity: 0.5 }}>
+                        <tbody>
+                          <tr>
+                            {table.getRowModel().rows
+                              .find(r => r.original.id === activeRowId)
+                              ?.getVisibleCells()
+                              .map(cell => (
+                                <td key={cell.id} style={{ padding: '8px', background: '#fff', border: '1px solid #ccc' }}>
+                                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                </td>
+                              ))}
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : null}
+                  </DragOverlay>
+                </DndContext>
               </div>
 
               {/* Pagination Controls */}
               <div className="pagination-container">
-                <div className="pagination-info">
-                  Showing {startIndex + 1} to {Math.min(endIndex, filteredAndSortedSessions.length)} of {filteredAndSortedSessions.length} entries
-                </div>
-                <div className="pagination-controls">
-                  <button
-                    className="pagination-btn"
-                    onClick={() => handlePageChange(currentPage - 1)}
-                    disabled={currentPage === 1}
-                  >
-                    <FaChevronLeft />
-                    <span>Previous</span>
-                  </button>
-                  
-                  <div className="pagination-numbers">
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter(page => {
-                        // Show first page, last page, current page, and pages around current
-                        return page === 1 || 
-                               page === totalPages || 
-                               (page >= currentPage - 1 && page <= currentPage + 1)
-                      })
-                      .map((page, index, array) => {
-                        // Add ellipsis if there's a gap
-                        const prevPage = array[index - 1]
-                        const showEllipsis = prevPage && page - prevPage > 1
-                        
-                        return (
-                          <React.Fragment key={page}>
-                            {showEllipsis && <span className="pagination-ellipsis">...</span>}
-                            <button
-                              className={`pagination-number ${currentPage === page ? 'active' : ''}`}
-                              onClick={() => handlePageChange(page)}
-                            >
-                              {page}
-                            </button>
-                          </React.Fragment>
-                        )
-                      })}
+                <div className="pagination-left">
+                  <div className="entries-per-page-container">
+                    <label htmlFor="entries-per-page-bottom">Show</label>
+                    <select
+                      id="entries-per-page-bottom"
+                      className="entries-per-page-select"
+                      value={pagination.pageSize}
+                      onChange={handleEntriesPerPageChange}
+                    >
+                      <option value={5}>5</option>
+                      <option value={10}>10</option>
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                    <span>entries</span>
                   </div>
-                  
-                  <button
-                    className="pagination-btn"
-                    onClick={() => handlePageChange(currentPage + 1)}
-                    disabled={currentPage === totalPages || totalPages === 0}
-                  >
-                    <span>Next</span>
-                    <FaChevronRight />
-                  </button>
+                </div>
+                <div className="pagination-right">
+                  <div className="total-amount">
+                    ${sessions.reduce((sum, session) => {
+                      const price = parseFloat(session.price?.replace('$', '') || 0)
+                      return sum + price
+                    }, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="pagination-controls">
+                    <button
+                      className="pagination-btn"
+                      onClick={() => table.previousPage()}
+                      disabled={!table.getCanPreviousPage()}
+                    >
+                      <span>&lt; Previous</span>
+                    </button>
+                    
+                    <div className="pagination-numbers">
+                      {Array.from({ length: table.getPageCount() }, (_, i) => i + 1)
+                        .filter(page => {
+                          const currentPage = table.getState().pagination.pageIndex + 1
+                          const totalPages = table.getPageCount()
+                          // Show first page, last page, current page, and pages around current
+                          return page === 1 || 
+                                 page === totalPages || 
+                                 (page >= currentPage - 1 && page <= currentPage + 1)
+                        })
+                        .map((page, index, array) => {
+                          // Add ellipsis if there's a gap
+                          const prevPage = array[index - 1]
+                          const showEllipsis = prevPage && page - prevPage > 1
+                          const currentPage = table.getState().pagination.pageIndex + 1
+                          
+                          return (
+                            <React.Fragment key={page}>
+                              {showEllipsis && <span className="pagination-ellipsis">...</span>}
+                              <button
+                                type="button"
+                                className={`pagination-number ${currentPage === page ? 'active' : ''}`}
+                                onClick={() => table.setPageIndex(page - 1)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault()
+                                    table.setPageIndex(page - 1)
+                                  }
+                                }}
+                                aria-label={`Go to page ${page}`}
+                                aria-current={currentPage === page ? 'page' : undefined}
+                              >
+                                {page}
+                              </button>
+                            </React.Fragment>
+                          )
+                        })}
+                    </div>
+                    
+                    <button
+                      className="pagination-btn"
+                      onClick={() => table.nextPage()}
+                      disabled={!table.getCanNextPage()}
+                    >
+                      <span>Next &gt;</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1203,18 +2615,20 @@ const ContractDetails = () => {
       </div>
 
       <div className="contract-footer">
-        <button className="cancel-btn" onClick={() => setIsCancelModalOpen(true)}>Cancel Contract</button>
+        <button className="footer-btn cancel-btn" onClick={() => setIsCancelModalOpen(true)}>
+          Cancel
+        </button>
         <div className="footer-actions">
-          <button className="action-btn send-btn" onClick={() => setIsSendModalOpen(true)}>
-            <FaEnvelope />
-            <span>Send</span>
-          </button>
-          <button className="action-btn save-btn">
+          <button className="footer-btn action-btn save-btn">
             <FaFileAlt />
             <span>Save & Close</span>
           </button>
-          <button className="action-btn firm-btn" onClick={() => setIsFirmModalOpen(true)}>
-            <FaFileAlt />
+          <button className="footer-btn action-btn send-btn" onClick={() => setIsSendModalOpen(true)}>
+            <FaEnvelope />
+            <span>Send</span>
+          </button>
+          <button className="footer-btn action-btn firm-btn" onClick={() => setIsFirmModalOpen(true)}>
+            <FaCheck />
             <span>Firm Contract</span>
           </button>
         </div>
@@ -1227,11 +2641,21 @@ const ContractDetails = () => {
         onSend={(formData) => {
           console.log('Sending contract:', formData)
           setIsSendModalOpen(false)
-          setShowNotification(true)
-          // Auto-hide notification after 5 seconds
-          setTimeout(() => {
-            setShowNotification(false)
-          }, 5000)
+          // Show success toast with custom component for progress bar
+          toast.custom(
+            (t) => (
+              <SuccessToast
+                message="Contract sent successfully"
+                onClose={() => toast.dismiss(t.id)}
+                t={t}
+                duration={4000}
+              />
+            ),
+            {
+              duration: Infinity, // Let our animation control when to close
+              position: 'top-right'             
+            }
+          )
         }}
       />
 
@@ -1242,11 +2666,21 @@ const ContractDetails = () => {
         onConfirm={() => {
           console.log('Contract firmed')
           setIsFirmModalOpen(false)
-          setShowFirmNotification(true)
-          // Auto-hide notification after 5 seconds
-          setTimeout(() => {
-            setShowFirmNotification(false)
-          }, 5000)
+          // Show success toast with custom component for progress bar
+          toast.custom(
+            (t) => (
+              <SuccessToast
+                message="Contract firmed successfully"
+                onClose={() => toast.dismiss(t.id)}
+                t={t}
+                duration={4000}
+              />
+            ),
+            {
+              duration: Infinity, // Let our animation control when to close
+              position: 'top-right'             
+            }
+          )
         }}
       />
 
@@ -1261,9 +2695,57 @@ const ContractDetails = () => {
           // You can add navigation or other actions
         }}
       />
+
+      {/* Edit Session Modal */}
+      <EditSessionModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false)
+          setEditingSession(null)
+        }}
+        session={editingSession}
+        onSave={handleSaveEditedSession}
+        locationFacilityMap={locationFacilityMap}
+        calculateFee={calculateFee}
+        calculatePrice={calculatePrice}
+        convertToDateInputFormat={convertToDateInputFormat}
+        convertFromDateInputFormat={convertFromDateInputFormat}
+        convertToTimeInputFormat={convertToTimeInputFormat}
+        convertFromTimeInputFormat={convertFromTimeInputFormat}
+      />
+
+      {/* Toast Container */}
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 4000,
+          removeDelay: 0,
+          pauseOnHover: false,
+          style: {
+            background: '#fff',
+            color: '#363636',
+            borderRadius: '8px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+          },
+          success: {
+            duration: 4000,
+            iconTheme: {
+              primary: '#34C759',
+              secondary: '#fff',
+            },
+          },
+          error: {
+            duration: 4000,
+            iconTheme: {
+              primary: '#e74c3c',
+              secondary: '#fff',
+            },
+          },
+        }}
+      />
     </div>
   )
 }
 
-export default ContractDetails
+export default ContractDetails;
 

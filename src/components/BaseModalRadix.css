@@ -1,0 +1,94 @@
+/* Base Modal Styles using Radix UI Dialog with Bootstrap CSS */
+/* Override Bootstrap modal backdrop for Radix */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1040;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* Radix Dialog Content with Bootstrap modal structure */
+.modal[data-radix-dialog-content] {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+  background: transparent;
+}
+
+.modal[data-radix-dialog-content] .modal-dialog {
+  margin: 1.75rem auto;
+  max-width: 500px;
+  width: 90%;
+}
+
+.modal[data-radix-dialog-content] .modal-dialog.modal-sm {
+  max-width: 300px;
+}
+
+.modal[data-radix-dialog-content] .modal-dialog.modal-lg {
+  max-width: 800px;
+}
+
+.modal[data-radix-dialog-content] .modal-dialog.modal-xl {
+  max-width: 1140px;
+}
+
+/* Close button styling - Bootstrap compatible */
+.modal-header .btn-close {
+  background: none;
+  border: none;
+  padding: 0.5rem;
+  margin: -0.5rem -0.5rem -0.5rem auto;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  color: #6c757d;
+  width: auto;
+  height: auto;
+}
+
+.modal-header .btn-close:hover {
+  opacity: 1;
+  color: #000;
+}
+
+.modal-header .btn-close:focus {
+  outline: 2px solid #0d6efd;
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+/* Animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal-backdrop {
+  animation: fadeIn 0.15s linear;
+}
+
+.modal[data-radix-dialog-content] {
+  animation: fadeIn 0.15s linear;
+}
+
+/* Responsive */
+@media (max-width: 576px) {
+  .modal[data-radix-dialog-content] .modal-dialog {
+    margin: 0.5rem;
+    width: calc(100% - 1rem);
+  }
+}
+

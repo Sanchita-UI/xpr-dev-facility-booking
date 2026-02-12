@@ -1,37 +1,39 @@
 import React from 'react'
-import { FaTimes } from 'react-icons/fa'
+import BaseModalRadix from './BaseModalRadix'
 import './CancelContractModal.css'
 
 const CancelContractModal = ({ isOpen, onClose, onConfirm }) => {
-  if (!isOpen) return null
+  const footer = (
+    <>
+      <button 
+        type="button" 
+        className="btn btn-secondary" 
+        onClick={onClose}
+      >
+        Close
+      </button>
+      <button 
+        type="button" 
+        className="btn btn-danger" 
+        onClick={onConfirm}
+      >
+        Yes, Cancel
+      </button>
+    </>
+  )
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 className="modal-title">Cancel Contract</h2>
-          <button className="modal-close-btn" onClick={onClose}>
-            <FaTimes />
-          </button>
-        </div>
-        <div className="modal-body">
-          <p className="cancel-modal-message">
-            Are you sure you wish to cancel this contract? All entered information will be deleted. This action cannot be undone.
-          </p>
-        </div>
-        <div className="modal-footer">
-          <button className="modal-cancel-btn" onClick={onClose}>
-            Close
-          </button>
-          <button 
-            className="modal-confirm-cancel-btn" 
-            onClick={onConfirm}
-          >
-            <span>Yes, Cancel</span>
-          </button>
-        </div>
-      </div>
-    </div>
+    <BaseModalRadix
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Cancel Contract"
+      size="medium"
+      footer={footer}
+    >
+      <p className="cancel-modal-message mb-0">
+        Are you sure you wish to cancel this contract? All entered information will be deleted. This action cannot be undone.
+      </p>
+    </BaseModalRadix>
   )
 }
 
