@@ -1,17 +1,9 @@
-/* Base Modal Styles using Radix UI Dialog with Bootstrap CSS */
-/* Override Bootstrap modal backdrop for Radix */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1040;
-  background-color: rgba(0, 0, 0, 0.5);
-}
-
-/* Radix Dialog Content with Bootstrap modal structure */
+/* Bootstrap Modal with Radix UI - Minimal overrides */
+/* Ensure Radix Dialog Content works with Bootstrap modal structure */
 .modal[data-radix-dialog-content] {
   position: fixed;
   inset: 0;
-  z-index: 1050;
+  z-index: 1055;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -19,76 +11,213 @@
   background: transparent;
 }
 
-.modal[data-radix-dialog-content] .modal-dialog {
-  margin: 1.75rem auto;
-  max-width: 500px;
-  width: 90%;
+/* Ensure modal is visible when open */
+.modal[data-radix-dialog-content][data-state="open"],
+.modal[data-radix-dialog-content].show {
+  display: flex !important;
 }
 
-.modal[data-radix-dialog-content] .modal-dialog.modal-sm {
-  max-width: 300px;
+/* Hide when closed */
+.modal[data-radix-dialog-content][data-state="closed"] {
+  display: none;
 }
 
-.modal[data-radix-dialog-content] .modal-dialog.modal-lg {
-  max-width: 800px;
-}
-
-.modal[data-radix-dialog-content] .modal-dialog.modal-xl {
-  max-width: 1140px;
-}
-
-/* Close button styling - Bootstrap compatible */
-.modal-header .btn-close {
-  background: none;
+/* Custom close button - remove Bootstrap's default icon and use large FaTimes icon */
+.modal-close-btn {
+  background: #0d6efd !important;
   border: none;
   padding: 0.5rem;
-  margin: -0.5rem -0.5rem -0.5rem auto;
   cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.2s;
+  transition: all 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.25rem;
-  color: #6c757d;
-  width: auto;
-  height: auto;
+  font-size: 1rem;
+  color: white !important;
+  border-radius: 0.25rem;
+  width: 2rem;
+  height: 2rem;
+  opacity: 1 !important;
+  background-image: none !important; /* Remove Bootstrap's default close icon */
+  background-size: auto !important;
 }
 
-.modal-header .btn-close:hover {
-  opacity: 1;
-  color: #000;
+/* Remove Bootstrap's default close icon from pseudo-elements */
+.modal-close-btn::before,
+.modal-close-btn::after {
+  display: none !important;
+  content: none !important;
 }
 
-.modal-header .btn-close:focus {
+.modal-close-btn:hover {
+  background: #0b5ed7 !important;
+  color: white !important;
+  opacity: 1 !important;
+}
+
+.modal-close-btn:focus {
   outline: 2px solid #0d6efd;
   outline-offset: 2px;
-  opacity: 1;
+  background: #0b5ed7 !important;
+  color: white !important;
+  opacity: 1 !important;
 }
 
-/* Animation */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+.modal-close-btn:active {
+  background: #0a58ca !important;
+  color: white !important;
 }
 
-.modal-backdrop {
-  animation: fadeIn 0.15s linear;
+.modal-close-btn svg {
+  width: 1rem;
+  height: 1rem;
 }
 
-.modal[data-radix-dialog-content] {
-  animation: fadeIn 0.15s linear;
+/* Draggable modal header */
+.modal-header-draggable {
+  cursor: move;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
 }
 
-/* Responsive */
-@media (max-width: 576px) {
-  .modal[data-radix-dialog-content] .modal-dialog {
-    margin: 0.5rem;
-    width: calc(100% - 1rem);
-  }
+.modal-header-draggable:active {
+  cursor: grabbing;
 }
 
+/* Prevent text selection while dragging */
+.modal-dialog.dragging {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Ensure modal dialog can be positioned when dragging */
+.modal-dialog {
+  position: relative;
+}
+
+/* When dragging, allow transform to position the modal */
+.modal-dialog.dragging.modal-dialog-centered {
+  margin: 0;
+}
+
+/* Hardware acceleration for smooth dragging */
+.modal-dialog.dragging {
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Resizable modal */
+.modal-content-resizable {
+  position: relative;
+  min-height: 200px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content-resizable .modal-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.modal-dialog.resizing {
+  will-change: width, height;
+}
+
+/* Resize handles */
+.resize-handle {
+  position: absolute;
+  background: transparent;
+  z-index: 10;
+}
+
+/* Edge handles */
+.resize-handle-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.resize-handle-right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: ew-resize;
+}
+
+.resize-handle-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.resize-handle-left {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: ew-resize;
+}
+
+/* Corner handles */
+.resize-handle-top-left {
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.resize-handle-top-right {
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+
+.resize-handle-bottom-right {
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+}
+
+.resize-handle-bottom-left {
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+}
+
+/* Visual feedback on hover */
+.resize-handle:hover {
+  background: rgba(13, 110, 253, 0.2);
+}
+
+.resize-handle-top-left:hover,
+.resize-handle-top-right:hover,
+.resize-handle-bottom-right:hover,
+.resize-handle-bottom-left:hover {
+  background: rgba(13, 110, 253, 0.3);
+}
+
+/* Spinner animation for loading states */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

@@ -3,7 +3,7 @@ import { useReactTable, getCoreRowModel, getSortedRowModel, getFilteredRowModel,
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy, horizontalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { FaArrowLeft, FaCopy, FaEnvelope, FaPhone, FaMapMarkerAlt, FaCalendarAlt, FaClock, FaUsers, FaPlus, FaCheck, FaCheckCircle, FaFileExport, FaFileAlt, FaPaperclip, FaToggleOn, FaToggleOff, FaList, FaTimes, FaSearch, FaChevronUp, FaChevronDown, FaChevronLeft, FaChevronRight, FaUndo, FaEdit, FaTrash, FaEllipsisV } from 'react-icons/fa'
+import { FaArrowLeft, FaCopy, FaEnvelope, FaPhone, FaMapMarkerAlt, FaCalendarAlt, FaClock, FaUsers, FaPlus, FaCheck, FaCheckCircle, FaFileExport, FaFileAlt, FaPaperclip, FaToggleOn, FaToggleOff, FaList, FaTimes, FaSearch, FaChevronUp, FaChevronDown, FaChevronLeft, FaChevronRight, FaUndo, FaEdit, FaTrash, FaEllipsisV, FaEye } from 'react-icons/fa'
 import toast, { Toaster } from 'react-hot-toast'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -12,9 +12,12 @@ import SendContractModal from '../components/SendContractModal'
 import FirmContractModal from '../components/FirmContractModal'
 import CancelContractModal from '../components/CancelContractModal'
 import EditSessionModal from '../components/EditSessionModal'
+import ViewSessionModal from '../components/ViewSessionModal'
 import MapThumbnail from '../components/MapThumbnail'
 import DeleteToast from '../components/DeleteToast'
 import SuccessToast from '../components/SuccessToast'
+import Tooltip from '../components/Tooltip'
+import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import meetingRoomImage from '../assets/images/meeting-room.jpg'
 import extrasImage from '../assets/images/extras.jpg'
 import './ContractDetails.css'
@@ -165,19 +168,21 @@ const ColumnFilterDropdown = ({ column, table, accessorKey, sessions, openFilter
   return (
     <>
       <div className="filter-dropdown-container" ref={containerRef} onClick={(e) => e.stopPropagation()}>
-        <button 
-          className="filter-dropdown-trigger"
-          onClick={(e) => {
-            e.stopPropagation()
-            setOpenFilterId(isOpen ? null : filterId)
-          }}
-          type="button"
-        >
-          <FaEllipsisV className="filter-icon" />
-          {filterValue && filterValue.length > 0 && (
-            <span className="filter-badge">{filterValue.length}</span>
-          )}
-        </button>
+        <Tooltip content={filterValue && filterValue.length > 0 ? `${filterValue.length} filter(s) active` : "Filter column values"} side="bottom">
+          <button 
+            className="filter-dropdown-trigger"
+            onClick={(e) => {
+              e.stopPropagation()
+              setOpenFilterId(isOpen ? null : filterId)
+            }}
+            type="button"
+          >
+            <FaEllipsisV className="filter-icon" />
+            {filterValue && filterValue.length > 0 && (
+              <span className="filter-badge">{filterValue.length}</span>
+            )}
+          </button>
+        </Tooltip>
       </div>
       {isOpen && (
         <div 
@@ -207,24 +212,26 @@ const ColumnFilterDropdown = ({ column, table, accessorKey, sessions, openFilter
             )}
           </div>
           {filterValue && filterValue.length > 0 && (
-            <button 
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                handleClearAll()
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
+            <Tooltip content="Remove all active filters" side="top">
+              <button 
+                type="button"
+                onClick={(e) => {
                   e.stopPropagation()
                   handleClearAll()
-                }
-              }}
-              className="filter-clear-btn"
-              aria-label="Clear all filters"
-            >
-              Clear filter
-            </button>
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    handleClearAll()
+                  }
+                }}
+                className="filter-clear-btn"
+                aria-label="Clear all filters"
+              >
+                Clear filter
+              </button>
+            </Tooltip>
           )}
         </div>
       )}
@@ -521,6 +528,8 @@ const ContractDetails = () => {
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingSession, setEditingSession] = useState(null)
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+  const [viewingSession, setViewingSession] = useState(null)
   
   // Pagination, Search, and Sorting states
   const [globalFilter, setGlobalFilter] = useState('')
@@ -540,6 +549,7 @@ const ContractDetails = () => {
   // Inline editing states
   const [editingCell, setEditingCell] = useState(null) // { sessionId, field }
   const [editValue, setEditValue] = useState('') // Temporary value while editing
+  const [locationErrors, setLocationErrors] = useState({}) // Track validation errors for location inputs
   const [newRowIds, setNewRowIds] = useState(new Set()) // Track newly added row IDs
   const [duplicatedRowIds, setDuplicatedRowIds] = useState(new Set()) // Track duplicated row IDs
   
@@ -628,6 +638,20 @@ const ContractDetails = () => {
     'Location E': ['Facility #13', 'Facility #14']
   }
 
+  // Get all valid locations
+  const allLocations = Object.keys(locationFacilityMap)
+
+  // Validate location
+  const validateLocation = (location) => {
+    if (!location || !location.trim()) {
+      return 'Location is required'
+    }
+    if (!allLocations.includes(location.trim())) {
+      return `Invalid location. Must be one of: ${allLocations.join(', ')}`
+    }
+    return null
+  }
+
   // Get available facilities for a given location
   const getAvailableFacilities = (location) => {
     return locationFacilityMap[location] || []
@@ -661,6 +685,20 @@ const ContractDetails = () => {
 
   // Auto-update fee and price when location changes
   const handleLocationSave = (sessionId, newLocation) => {
+    // Validate location
+    const error = validateLocation(newLocation)
+    if (error) {
+      setLocationErrors(prev => ({ ...prev, [sessionId]: error }))
+      return false
+    }
+
+    // Clear error if validation passes
+    setLocationErrors(prev => {
+      const newErrors = { ...prev }
+      delete newErrors[sessionId]
+      return newErrors
+    })
+
     const session = sessions.find(s => s.id === sessionId)
     if (session) {
       // Check if current facility is available for the new location
@@ -679,7 +717,9 @@ const ContractDetails = () => {
           ? { ...s, location: newLocation, facility: updatedFacility, fee: updatedFee, price: updatedPrice }
           : s
       ))
+      return true
     }
+    return false
   }
 
   // Calculate fee based on location and facility (mock calculation)
@@ -1021,9 +1061,14 @@ const ContractDetails = () => {
 
     // Special handling for location - auto-update fee and price
     if (field === 'location') {
-      handleLocationSave(sessionId, valueToSave)
-      setEditingCell(null)
-      setEditValue('')
+      const success = handleLocationSave(sessionId, valueToSave)
+      if (success) {
+        setEditingCell(null)
+        setEditValue('')
+      } else {
+        // Keep editing cell open if validation failed
+        return
+      }
       return
     }
 
@@ -1083,6 +1128,15 @@ const ContractDetails = () => {
       newSelected.add(sessionId)
     }
     setSelectedRows(newSelected)
+  }
+
+  // Handle view row
+  const handleViewRow = (sessionId) => {
+    const session = sessions.find(s => s.id === sessionId)
+    if (session) {
+      setViewingSession(session)
+      setIsViewModalOpen(true)
+    }
   }
 
   // Handle edit row
@@ -1309,37 +1363,39 @@ const ContractDetails = () => {
       id: 'expand',
       header: () => null,
       cell: ({ row }) => (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            row.toggleExpanded()
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
+        <Tooltip content={row.getIsExpanded() ? "Collapse row details" : "Expand row details"} side="right">
+          <button
+            onClick={(e) => {
               e.stopPropagation()
               row.toggleExpanded()
-            }
-          }}
-          className="expand-button"
-          aria-label={row.getIsExpanded() ? `Collapse row ${row.original.id} details` : `Expand row ${row.original.id} details`}
-          aria-expanded={row.getIsExpanded()}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            padding: '4px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {row.getIsExpanded() ? (
-            <FaChevronDown style={{ fontSize: '12px', color: '#666' }} aria-hidden="true" />
-          ) : (
-            <FaChevronRight style={{ fontSize: '12px', color: '#666' }} aria-hidden="true" />
-          )}
-        </button>
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.stopPropagation()
+                row.toggleExpanded()
+              }
+            }}
+            className="expand-button"
+            aria-label={row.getIsExpanded() ? `Collapse row ${row.original.id} details` : `Expand row ${row.original.id} details`}
+            aria-expanded={row.getIsExpanded()}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {row.getIsExpanded() ? (
+              <FaChevronUp style={{ fontSize: '12px', color: '#666' }} aria-hidden="true" />
+            ) : (
+              <FaChevronDown style={{ fontSize: '12px', color: '#666' }} aria-hidden="true" />
+            )}
+          </button>
+        </Tooltip>
       ),
       enableSorting: false,
       size: 40,
@@ -1354,44 +1410,49 @@ const ContractDetails = () => {
         const someSelected = currentPageRows.some(row => selectedRows.has(row.original.id))
         
         return (
-          <input
-            type="checkbox"
-            checked={allSelected}
-            ref={(el) => {
-              if (el) el.indeterminate = someSelected && !allSelected
-            }}
-            onChange={(e) => {
-              const checked = e.target.checked
-              const newSelected = new Set(selectedRows)
-              const currentPageRows = table.getRowModel().rows
-              
-              if (checked) {
-                // Select all rows on current page
-                currentPageRows.forEach(row => {
-                  newSelected.add(row.original.id)
-                })
-              } else {
-                // Unselect all rows on current page
-                currentPageRows.forEach(row => {
-                  newSelected.delete(row.original.id)
-                })
-              }
-              setSelectedRows(newSelected)
-            }}
-            onClick={(e) => e.stopPropagation()}
-            aria-label={allSelected ? "Unselect all rows on this page" : "Select all rows on this page"}
-            title={allSelected ? "Unselect all rows on this page" : "Select all rows on this page"}
-          />
+          <Tooltip content={allSelected ? "Unselect all rows on this page" : "Select all rows on this page"} side="top">
+            <span style={{ display: 'inline-block' }}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => {
+                  if (el) el.indeterminate = someSelected && !allSelected
+                }}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  const newSelected = new Set(selectedRows)
+                  const currentPageRows = table.getRowModel().rows
+                  
+                  if (checked) {
+                    // Select all rows on current page
+                    currentPageRows.forEach(row => {
+                      newSelected.add(row.original.id)
+                    })
+                  } else {
+                    // Unselect all rows on current page
+                    currentPageRows.forEach(row => {
+                      newSelected.delete(row.original.id)
+                    })
+                  }
+                  setSelectedRows(newSelected)
+                }}
+                onClick={(e) => e.stopPropagation()}
+                aria-label={allSelected ? "Unselect all rows on this page" : "Select all rows on this page"}
+              />
+            </span>
+          </Tooltip>
         )
       },
       cell: ({ row }) => (
-        <input
-          type="checkbox"
-          checked={selectedRows.has(row.original.id)}
-          onChange={() => handleRowSelect(row.original.id)}
-          onClick={(e) => e.stopPropagation()}
-          aria-label={selectedRows.has(row.original.id) ? `Unselect row ${row.original.id}` : `Select row ${row.original.id}`}
-        />
+        <Tooltip content={selectedRows.has(row.original.id) ? `Unselect row ${row.original.id}` : `Select row ${row.original.id}`} side="right">
+          <input
+            type="checkbox"
+            checked={selectedRows.has(row.original.id)}
+            onChange={() => handleRowSelect(row.original.id)}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={selectedRows.has(row.original.id) ? `Unselect row ${row.original.id}` : `Select row ${row.original.id}`}
+          />
+        </Tooltip>
       ),
       enableSorting: false,
     },
@@ -1780,6 +1841,9 @@ const ContractDetails = () => {
       },
       cell: ({ row }) => {
         const session = row.original
+        const isEditingLocation = isEditing(session.id, 'location')
+        const locationError = locationErrors[session.id]
+        
         return (
           <div
             className="editable-cell"
@@ -1794,25 +1858,54 @@ const ContractDetails = () => {
             }}
             style={{ position: 'relative' }}
           >
-            {isEditing(session.id, 'location') ? (
-              <input
-                type="text"
-                className="inline-edit-input"
-                value={editValue}
-                onChange={handleCellChange}
-                onBlur={() => {
-                  // Don't save if we're switching to another cell
-                  if (!isSwitchingCellRef.current) {
-                    handleCellSave(session.id, 'location')
-                  }
-                }}
-                onKeyDown={(e) => handleCellKeyDown(e, session.id, 'location')}
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                autoFocus
-              />
+            {isEditingLocation ? (
+              <>
+                <Tooltip 
+                  content={locationError || "Enter a valid location (e.g., Location A, Location B, Location C, Location D, Location E)"} 
+                  side="top"
+                >
+                  <input
+                    type="text"
+                    className={`inline-edit-input ${locationError ? 'is-invalid' : ''}`}
+                    value={editValue}
+                    onChange={handleCellChange}
+                    onBlur={() => {
+                      // Don't save if we're switching to another cell
+                      if (!isSwitchingCellRef.current) {
+                        handleCellSave(session.id, 'location')
+                      }
+                    }}
+                    onKeyDown={(e) => handleCellKeyDown(e, session.id, 'location')}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    autoFocus
+                    placeholder="Enter location"
+                  />
+                </Tooltip>
+                {locationError && (
+                  <div className="invalid-feedback" style={{ 
+                    display: 'block', 
+                    fontSize: '12px', 
+                    color: '#dc3545', 
+                    marginTop: '4px',
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    zIndex: 20,
+                    background: 'white',
+                    padding: '4px 8px',
+                    border: '1px solid #dc3545',
+                    borderRadius: '4px',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                  }}>
+                    {locationError}
+                  </div>
+                )}
+              </>
             ) : (
-              <span onClick={(e) => e.stopPropagation()}>{session.location}</span>
+              <Tooltip content="Click to edit location" side="top">
+                <span onClick={(e) => e.stopPropagation()}>{session.location}</span>
+              </Tooltip>
             )}
           </div>
         )
@@ -1917,33 +2010,35 @@ const ContractDetails = () => {
       accessorKey: 'include',
       header: 'Include',
       cell: ({ row }) => (
-        <button
-          type="button"
-          className={row.original.include ? "toggle-on" : "toggle-off"}
-          onClick={() => handleIncludeToggle(row.original.id)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              handleIncludeToggle(row.original.id)
-            }
-          }}
-          aria-label={row.original.include ? `Exclude row ${row.original.id}` : `Include row ${row.original.id}`}
-          aria-pressed={row.original.include}
-          style={{ 
-            background: 'none', 
-            border: 'none', 
-            cursor: 'pointer',
-            padding: 0,
-            display: 'inline-flex',
-            alignItems: 'center'
-          }}
-        >
-          {row.original.include ? (
-            <FaToggleOn aria-hidden="true" />
-          ) : (
-            <FaToggleOff aria-hidden="true" />
-          )}
-        </button>
+        <Tooltip content={row.original.include ? "Exclude row" : "Include row"} side="top">
+          <button
+            type="button"
+            className={row.original.include ? "toggle-on" : "toggle-off"}
+            onClick={() => handleIncludeToggle(row.original.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                handleIncludeToggle(row.original.id)
+              }
+            }}
+            aria-label={row.original.include ? `Exclude row ${row.original.id}` : `Include row ${row.original.id}`}
+            aria-pressed={row.original.include}
+            style={{ 
+              background: 'none', 
+              border: 'none', 
+              cursor: 'pointer',
+              padding: 0,
+              display: 'inline-flex',
+              alignItems: 'center'
+            }}
+          >
+            {row.original.include ? (
+              <FaToggleOn aria-hidden="true" />
+            ) : (
+              <FaToggleOff aria-hidden="true" />
+            )}
+          </button>
+        </Tooltip>
       ),
       enableSorting: false,
     },
@@ -1952,55 +2047,75 @@ const ContractDetails = () => {
       header: 'Actions',
       cell: ({ row }) => (
         <div className="row-actions" role="group" aria-label={`Actions for row ${row.original.id}`}>
-          <button
-            type="button"
-            className="action-btn edit-btn"
-            onClick={(e) => {
-              e.stopPropagation()
-              handleEditRow(row.original.id)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
+          <Tooltip content="View row" side="top">
+            <button
+              type="button"
+              className="action-btn view-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleViewRow(row.original.id)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleViewRow(row.original.id)
+                }
+              }}
+              aria-label={`View row ${row.original.id}`}
+            >
+              <FaEye />
+            </button>
+          </Tooltip>
+          <Tooltip content="Edit row" side="top">
+            <button
+              type="button"
+              className="action-btn edit-btn"
+              onClick={(e) => {
                 e.stopPropagation()
                 handleEditRow(row.original.id)
-              }
-            }}
-            aria-label={`Edit row ${row.original.id}`}
-            title="Edit row"
-          >
-            <FaEdit aria-hidden="true" />
-            <span className="sr-only">Edit</span>
-          </button>
-          <button
-            type="button"
-            className="action-btn delete-btn"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              handleDeleteRow(row.original.id)
-            }}
-            onMouseDown={(e) => {
-              e.stopPropagation()
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleEditRow(row.original.id)
+                }
+              }}
+              aria-label={`Edit row ${row.original.id}`}
+            >
+              <FaEdit />
+            </button>
+          </Tooltip>
+          <Tooltip content="Delete row" side="top">
+            <button
+              type="button"
+              className="action-btn delete-btn"
+              onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 handleDeleteRow(row.original.id)
-              }
-            }}
-            aria-label={`Delete row ${row.original.id}`}
-            title="Delete row"
-          >
-            <FaTrash aria-hidden="true" />
-            <span className="sr-only">Delete</span>
-          </button>
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation()
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleDeleteRow(row.original.id)
+                }
+              }}
+              aria-label={`Delete row ${row.original.id}`}
+            >
+              <FaTrash />
+            </button>
+          </Tooltip>
         </div>
       ),
       enableSorting: false,
     },
-  ], [sessions, editingCell, editValue, selectedRows, handleCellClick, handleCellChange, handleCellSave, handleCellKeyDown, isEditing, handleFacilityChange, getAvailableFacilities, handleIncludeToggle, handleEditRow, handleDeleteRow])
+  ], [sessions, editingCell, editValue, selectedRows, handleCellClick, handleCellChange, handleCellSave, handleCellKeyDown, isEditing, handleFacilityChange, getAvailableFacilities, handleIncludeToggle, handleViewRow, handleEditRow, handleDeleteRow])
 
   // Global filter function
   const globalFilterFn = (row, columnId, filterValue) => {
@@ -2165,18 +2280,21 @@ const ContractDetails = () => {
   }
 
   return (
-    <div className="contract-details-page">
+    <TooltipPrimitive.Provider delayDuration={300} skipDelayDuration={0}>
+      <div className="contract-details-page">
 
      
       <div className="contract-header">
-        <button 
-          type="button"
-          className="back-button"
-          aria-label="Go back to previous page"
-        >
-          <FaArrowLeft aria-hidden="true" />
-          <span>Back</span>
-        </button>
+        <Tooltip content="Go back to previous page" side="bottom">
+          <button 
+            type="button"
+            className="back-button"
+            aria-label="Go back to previous page"
+          >
+            <FaArrowLeft aria-hidden="true" />
+            <span>Back</span>
+          </button>
+        </Tooltip>
         <div className="contract-title-section">
           <h1 className="contract-title">Contract Details</h1>
           <p className="contract-subtitle">Advanced Reservation Sessions</p>
@@ -2277,32 +2395,33 @@ const ContractDetails = () => {
             {tabs.map((tab) => {
               const Icon = tab.icon
               return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
-                  onClick={() => setActiveTab(tab.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      setActiveTab(tab.id)
-                    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                      e.preventDefault()
-                      const currentIndex = tabs.findIndex(t => t.id === tab.id)
-                      const nextIndex = e.key === 'ArrowRight' 
-                        ? (currentIndex + 1) % tabs.length
-                        : (currentIndex - 1 + tabs.length) % tabs.length
-                      setActiveTab(tabs[nextIndex].id)
-                      document.querySelectorAll('.tab-button')[nextIndex]?.focus()
-                    }
-                  }}
-                  aria-label={`${tab.label} tab`}
-                  aria-selected={activeTab === tab.id}
-                  role="tab"
-                >
-                  <Icon className="tab-icon" aria-hidden="true" />
-                  <span>{tab.label}</span>
-                </button>
+                <Tooltip key={tab.id} content={`Switch to ${tab.label} tab`} side="bottom">
+                  <button
+                    type="button"
+                    className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
+                    onClick={() => setActiveTab(tab.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setActiveTab(tab.id)
+                      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                        e.preventDefault()
+                        const currentIndex = tabs.findIndex(t => t.id === tab.id)
+                        const nextIndex = e.key === 'ArrowRight' 
+                          ? (currentIndex + 1) % tabs.length
+                          : (currentIndex - 1 + tabs.length) % tabs.length
+                        setActiveTab(tabs[nextIndex].id)
+                        document.querySelectorAll('.tab-button')[nextIndex]?.focus()
+                      }
+                    }}
+                    aria-label={`${tab.label} tab`}
+                    aria-selected={activeTab === tab.id}
+                    role="tab"
+                  >
+                    <Icon className="tab-icon" aria-hidden="true" />
+                    <span>{tab.label}</span>
+                  </button>
+                </Tooltip>
               )
             })}
           </div>
@@ -2311,37 +2430,54 @@ const ContractDetails = () => {
             <div className="sessions-content">
               <div className="sessions-header">
                 <div className="sessions-left">
-                  <button 
-                    className="bulk-update-btn"
-                    disabled={selectedRows.size === 0}
+                  <Tooltip 
+                    content={selectedRows.size === 0 ? "Select rows to enable bulk update" : "Update multiple selected sessions at once"} 
+                    side="bottom"
                   >
-                    <FaPlus />
-                    <span>Bulk Update</span>
-                  </button>
+                    <button 
+                      className="bulk-update-btn"
+                      disabled={selectedRows.size === 0}
+                    >
+                      <FaPlus />
+                      <span>Bulk Update</span>
+                    </button>
+                  </Tooltip>
                   <div className="success-message">
                     <FaCheck className="check-icon" />
                     <span>{sessions.length} sessions created</span>
                   </div>
                 </div>
                 <div className="sessions-right">
-                  <button 
-                    type="button"
-                    className="export-btn export-csv-btn" 
-                    onClick={exportToCSV}
-                    aria-label="Export selected sessions to CSV"
+                  <Tooltip 
+                    content={selectedRows.size === 0 ? "Select rows to export" : `Export ${selectedRows.size} selected session(s) to CSV file`} 
+                    side="bottom"
                   >
-                    <FaFileExport className="export-icon" aria-hidden="true" />
-                    <span>Export CSV</span>
-                  </button>
-                  <button 
-                    type="button"
-                    className="export-btn export-pdf-btn" 
-                    onClick={exportToPDF}
-                    aria-label="Export selected sessions to PDF"
+                    <button 
+                      type="button"
+                      className="export-btn export-csv-btn" 
+                      onClick={exportToCSV}
+                      aria-label="Export selected sessions to CSV"
+                      disabled={selectedRows.size === 0}
+                    >
+                      <FaFileExport className="export-icon" aria-hidden="true" />
+                      <span>Export CSV</span>
+                    </button>
+                  </Tooltip>
+                  <Tooltip 
+                    content={selectedRows.size === 0 ? "Select rows to export" : `Export ${selectedRows.size} selected session(s) to PDF file`} 
+                    side="bottom"
                   >
-                    <FaFileAlt className="export-icon" aria-hidden="true" />
-                    <span>Export PDF</span>
-                  </button>
+                    <button 
+                      type="button"
+                      className="export-btn export-pdf-btn" 
+                      onClick={exportToPDF}
+                      aria-label="Export selected sessions to PDF"
+                      disabled={selectedRows.size === 0}
+                    >
+                      <FaFileAlt className="export-icon" aria-hidden="true" />
+                      <span>Export PDF</span>
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -2385,22 +2521,23 @@ const ContractDetails = () => {
                     of {table.getFilteredRowModel().rows.length} entries
                   </div>
                   {(hasOrderChanged || hasColumnOrderChanged) && (
-                    <button
-                      type="button"
-                      className="reset-order-btn"
-                      onClick={handleResetOrder}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          handleResetOrder()
-                        }
-                      }}
-                      aria-label="Reset table to original row and column order"
-                      title="Reset to original order"
-                    >
-                      <FaUndo className="reset-icon" aria-hidden="true" />
-                      <span>Reset Order</span>
-                    </button>
+                    <Tooltip content="Reset to original order" side="top">
+                      <button
+                        type="button"
+                        className="reset-order-btn"
+                        onClick={handleResetOrder}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            handleResetOrder()
+                          }
+                        }}
+                        aria-label="Reset table to original row and column order"
+                      >
+                        <FaUndo className="reset-icon" aria-hidden="true" />
+                        <span>Reset Order</span>
+                      </button>
+                    </Tooltip>
                   )}
                 </div>
               </div>
@@ -2547,13 +2684,16 @@ const ContractDetails = () => {
                     }, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                   <div className="pagination-controls">
-                    <button
-                      className="pagination-btn"
-                      onClick={() => table.previousPage()}
-                      disabled={!table.getCanPreviousPage()}
-                    >
-                      <span>&lt; Previous</span>
-                    </button>
+                    <Tooltip content="Go to previous page" side="top">
+                      <button
+                        className="pagination-btn"
+                        onClick={() => table.previousPage()}
+                        disabled={!table.getCanPreviousPage()}
+                        aria-label="Go to previous page"
+                      >
+                        <span>&lt; Previous</span>
+                      </button>
+                    </Tooltip>
                     
                     <div className="pagination-numbers">
                       {Array.from({ length: table.getPageCount() }, (_, i) => i + 1)
@@ -2574,63 +2714,78 @@ const ContractDetails = () => {
                           return (
                             <React.Fragment key={page}>
                               {showEllipsis && <span className="pagination-ellipsis">...</span>}
-                              <button
-                                type="button"
-                                className={`pagination-number ${currentPage === page ? 'active' : ''}`}
-                                onClick={() => table.setPageIndex(page - 1)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault()
-                                    table.setPageIndex(page - 1)
-                                  }
-                                }}
-                                aria-label={`Go to page ${page}`}
-                                aria-current={currentPage === page ? 'page' : undefined}
-                              >
-                                {page}
-                              </button>
+                              <Tooltip content={`Go to page ${page}`} side="top">
+                                <button
+                                  type="button"
+                                  className={`pagination-number ${currentPage === page ? 'active' : ''}`}
+                                  onClick={() => table.setPageIndex(page - 1)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault()
+                                      table.setPageIndex(page - 1)
+                                    }
+                                  }}
+                                  aria-label={`Go to page ${page}`}
+                                  aria-current={currentPage === page ? 'page' : undefined}
+                                >
+                                  {page}
+                                </button>
+                              </Tooltip>
                             </React.Fragment>
                           )
                         })}
                     </div>
                     
-                    <button
-                      className="pagination-btn"
-                      onClick={() => table.nextPage()}
-                      disabled={!table.getCanNextPage()}
-                    >
-                      <span>Next &gt;</span>
-                    </button>
+                    <Tooltip content="Go to next page" side="top">
+                      <button
+                        className="pagination-btn"
+                        onClick={() => table.nextPage()}
+                        disabled={!table.getCanNextPage()}
+                        aria-label="Go to next page"
+                      >
+                        <span>Next &gt;</span>
+                      </button>
+                    </Tooltip>
                   </div>
                 </div>
               </div>
 
-              <button className="add-session-btn" onClick={handleAddSession}>
-                <FaPlus />
-                <span>Add Session</span>
-              </button>
+              <Tooltip content="Add a new session row" side="top">
+                <button className="add-session-btn" onClick={handleAddSession} aria-label="Add new session">
+                  <FaPlus />
+                  <span>Add Session</span>
+                </button>
+              </Tooltip>
             </div>
           )}
         </div>
       </div>
 
       <div className="contract-footer">
-        <button className="footer-btn cancel-btn" onClick={() => setIsCancelModalOpen(true)}>
-          Cancel
-        </button>
+        <Tooltip content="Cancel and discard changes" side="top">
+          <button className="footer-btn cancel-btn" onClick={() => setIsCancelModalOpen(true)} aria-label="Cancel contract">
+            Cancel
+          </button>
+        </Tooltip>
         <div className="footer-actions">
-          <button className="footer-btn action-btn save-btn">
-            <FaFileAlt />
-            <span>Save & Close</span>
-          </button>
-          <button className="footer-btn action-btn send-btn" onClick={() => setIsSendModalOpen(true)}>
-            <FaEnvelope />
-            <span>Send</span>
-          </button>
-          <button className="footer-btn action-btn firm-btn" onClick={() => setIsFirmModalOpen(true)}>
-            <FaCheck />
-            <span>Firm Contract</span>
-          </button>
+          <Tooltip content="Save contract and close" side="top">
+            <button className="footer-btn action-btn save-btn" aria-label="Save and close contract">
+              <FaFileAlt />
+              <span>Save & Close</span>
+            </button>
+          </Tooltip>
+          <Tooltip content="Send contract via email" side="top">
+            <button className="footer-btn action-btn send-btn" onClick={() => setIsSendModalOpen(true)} aria-label="Send contract">
+              <FaEnvelope />
+              <span>Send</span>
+            </button>
+          </Tooltip>
+          <Tooltip content="Firm and finalize the contract" side="top">
+            <button className="footer-btn action-btn firm-btn" onClick={() => setIsFirmModalOpen(true)} aria-label="Firm contract">
+              <FaCheck />
+              <span>Firm Contract</span>
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -2696,6 +2851,16 @@ const ContractDetails = () => {
         }}
       />
 
+      {/* View Session Modal */}
+      <ViewSessionModal
+        isOpen={isViewModalOpen}
+        onClose={() => {
+          setIsViewModalOpen(false)
+          setViewingSession(null)
+        }}
+        session={viewingSession}
+      />
+
       {/* Edit Session Modal */}
       <EditSessionModal
         isOpen={isEditModalOpen}
@@ -2743,7 +2908,8 @@ const ContractDetails = () => {
           },
         }}
       />
-    </div>
+      </div>
+    </TooltipPrimitive.Provider>
   )
 }
 

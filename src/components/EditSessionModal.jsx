@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { FaSave } from 'react-icons/fa'
 import DrawerRadix from './DrawerRadix'
+import ConfirmCloseModal from './ConfirmCloseModal'
+import Tooltip from './Tooltip'
 import './EditSessionModal.css'
 
 const EditSessionModal = ({ 
@@ -30,11 +32,16 @@ const EditSessionModal = ({
   })
 
   const [errors, setErrors] = useState({})
+  const [showConfirmClose, setShowConfirmClose] = useState(false)
+  const initialFormDataRef = useRef(null)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const pendingCloseCallbackRef = useRef(null)
+  const [isSaving, setIsSaving] = useState(false)
 
   // Initialize form data when session changes
   useEffect(() => {
     if (session) {
-      setFormData({
+      const initialData = {
         startDate: convertToDateInputFormat(session.startDate || ''),
         endDate: convertToDateInputFormat(session.endDate || ''),
         startTime: convertToTimeInputFormat(session.startTime || ''),
@@ -45,18 +52,51 @@ const EditSessionModal = ({
         fee: session.fee || '',
         price: session.price || '',
         include: session.include !== undefined ? session.include : true
-      })
+      }
+      setFormData(initialData)
+      initialFormDataRef.current = initialData
+      setHasUnsavedChanges(false)
       setErrors({})
     }
   }, [session, convertToDateInputFormat, convertToTimeInputFormat])
+
+  // Check for unsaved changes whenever formData changes
+  useEffect(() => {
+    if (initialFormDataRef.current && session) {
+      const hasChanges = JSON.stringify(formData) !== JSON.stringify(initialFormDataRef.current)
+      setHasUnsavedChanges(hasChanges)
+    }
+  }, [formData, session])
 
   // Get available facilities for selected location
   const getAvailableFacilities = (location) => {
     return locationFacilityMap[location] || []
   }
 
+  // Validate location (same as inline edit)
+  const validateLocation = (location) => {
+    const allLocations = Object.keys(locationFacilityMap)
+    if (!location || !location.trim()) {
+      return 'Location is required'
+    }
+    if (!allLocations.includes(location.trim())) {
+      return `Invalid location. Must be one of: ${allLocations.join(', ')}`
+    }
+    return null
+  }
+
   // Handle location change - update facility and recalculate fee/price
   const handleLocationChange = (newLocation) => {
+    // Validate location in real-time
+    const locationError = validateLocation(newLocation)
+    const newErrors = { ...errors }
+    if (locationError) {
+      newErrors.location = locationError
+    } else {
+      delete newErrors.location
+    }
+    setErrors(newErrors)
+
     const availableFacilities = getAvailableFacilities(newLocation)
     const currentFacility = formData.facility
     
@@ -94,6 +134,7 @@ const EditSessionModal = ({
   // Validate form
   const validate = () => {
     const newErrors = {}
+    const allLocations = Object.keys(locationFacilityMap)
     
     if (!formData.startDate.trim()) {
       newErrors.startDate = 'Start date is required'
@@ -109,6 +150,8 @@ const EditSessionModal = ({
     }
     if (!formData.location.trim()) {
       newErrors.location = 'Location is required'
+    } else if (!allLocations.includes(formData.location.trim())) {
+      newErrors.location = `Invalid location. Must be one of: ${allLocations.join(', ')}`
     }
     if (!formData.facility.trim()) {
       newErrors.facility = 'Facility is required'
@@ -119,27 +162,82 @@ const EditSessionModal = ({
   }
 
   // Handle save
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validate()) {
       return
     }
 
-    const updatedSession = {
-      ...session,
-      startDate: convertFromDateInputFormat(formData.startDate),
-      endDate: convertFromDateInputFormat(formData.endDate),
-      startTime: convertFromTimeInputFormat(formData.startTime),
-      endTime: convertFromTimeInputFormat(formData.endTime),
-      location: formData.location,
-      facility: formData.facility,
-      extraFees: formData.extraFees,
-      fee: formData.fee,
-      price: formData.price,
-      include: formData.include
-    }
+    setIsSaving(true)
 
-    onSave(updatedSession)
-    onClose()
+    try {
+      const updatedSession = {
+        ...session,
+        startDate: convertFromDateInputFormat(formData.startDate),
+        endDate: convertFromDateInputFormat(formData.endDate),
+        startTime: convertFromTimeInputFormat(formData.startTime),
+        endTime: convertFromTimeInputFormat(formData.endTime),
+        location: formData.location,
+        facility: formData.facility,
+        extraFees: formData.extraFees,
+        fee: formData.fee,
+        price: formData.price,
+        include: formData.include
+      }
+
+      // Call onSave and check if it returns a Promise
+      const saveResult = onSave(updatedSession)
+      
+      // If onSave returns a Promise, await it; otherwise add a small delay for UX
+      if (saveResult && typeof saveResult.then === 'function') {
+        await saveResult
+      } else {
+        // Simulate async operation for better UX
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
+
+      setHasUnsavedChanges(false)
+      onClose()
+    } catch (error) {
+      console.error('Error saving session:', error)
+      // You can add error handling/toast notification here
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Handle close attempt with confirmation
+  const handleCloseAttempt = (confirmClose) => {
+    if (hasUnsavedChanges) {
+      pendingCloseCallbackRef.current = confirmClose
+      setShowConfirmClose(true)
+    } else {
+      onClose()
+    }
+  }
+
+  // Handle confirm close
+  const handleConfirmClose = () => {
+    setShowConfirmClose(false)
+    if (pendingCloseCallbackRef.current) {
+      pendingCloseCallbackRef.current()
+      pendingCloseCallbackRef.current = null
+    }
+    setHasUnsavedChanges(false)
+  }
+
+  // Handle cancel close
+  const handleCancelClose = () => {
+    setShowConfirmClose(false)
+    pendingCloseCallbackRef.current = null
+  }
+
+  // Handle cancel button
+  const handleCancel = () => {
+    if (hasUnsavedChanges) {
+      handleCloseAttempt(() => onClose())
+    } else {
+      onClose()
+    }
   }
 
   if (!session) return null
@@ -152,7 +250,8 @@ const EditSessionModal = ({
       <button 
         type="button" 
         className="btn btn-secondary" 
-        onClick={onClose}
+        onClick={handleCancel}
+        disabled={isSaving}
       >
         Cancel
       </button>
@@ -160,22 +259,27 @@ const EditSessionModal = ({
         type="button" 
         className="btn btn-primary" 
         onClick={handleSave}
+        disabled={isSaving}
       >
         <FaSave className="me-2" />
-        Save Changes
+        {isSaving ? 'Saving...' : 'Save Changes'}
       </button>
     </>
   )
 
   return (
-    <DrawerRadix
-      isOpen={isOpen}
-      onClose={onClose}
-      title="Edit Session"
-      position="right"
-      size="large"
-      footer={footer}
-    >
+    <>
+      <DrawerRadix
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Edit Session"
+        position="right"
+        size="large"
+        footer={footer}
+        preventClose={hasUnsavedChanges || isSaving}
+        onCloseAttempt={handleCloseAttempt}
+        loading={isSaving}
+      >
       <div className="edit-session-form">
         <div className="row g-3">
           <div className="col-md-6">
@@ -239,21 +343,42 @@ const EditSessionModal = ({
 
         <div className="row g-3 mt-2">
           <div className="col-md-6">
-            <label htmlFor="location" className="form-label">
-              Location <span className="text-danger">*</span>
-            </label>
-            <select
-              id="location"
-              className={`form-select ${errors.location ? 'is-invalid' : ''}`}
-              value={formData.location}
-              onChange={(e) => handleLocationChange(e.target.value)}
+            <Tooltip content="Enter a valid location. Available locations: Location A, Location B, Location C, Location D, Location E" side="right">
+              <label htmlFor="location" className="form-label">
+                Location <span className="text-danger">*</span>
+              </label>
+            </Tooltip>
+            <Tooltip 
+              content={errors.location || "Enter a valid location (e.g., Location A, Location B, Location C, Location D, Location E)"} 
+              side="right"
             >
-              <option value="">Select Location</option>
-              {allLocations.map(location => (
-                <option key={location} value={location}>{location}</option>
-              ))}
-            </select>
-            {errors.location && <div className="invalid-feedback">{errors.location}</div>}
+              <input
+                type="text"
+                id="location"
+                className={`form-control ${errors.location ? 'is-invalid' : ''}`}
+                value={formData.location}
+                onChange={(e) => handleLocationChange(e.target.value)}
+                onBlur={(e) => {
+                  // Re-validate on blur
+                  const error = validateLocation(e.target.value)
+                  if (error) {
+                    setErrors(prev => ({ ...prev, location: error }))
+                  } else {
+                    setErrors(prev => {
+                      const newErrors = { ...prev }
+                      delete newErrors.location
+                      return newErrors
+                    })
+                  }
+                }}
+                placeholder="Enter location"
+                style={{
+                  borderColor: errors.location ? '#dc3545' : undefined,
+                  borderWidth: errors.location ? '2px' : undefined
+                }}
+              />
+            </Tooltip>
+            {errors.location && <div className="invalid-feedback" style={{ display: 'block' }}>{errors.location}</div>}
           </div>
 
           <div className="col-md-6">
@@ -332,6 +457,16 @@ const EditSessionModal = ({
         </div>
       </div>
     </DrawerRadix>
+
+    {/* Confirmation Modal - Centered Popup */}
+    <ConfirmCloseModal
+      isOpen={showConfirmClose}
+      onConfirm={handleConfirmClose}
+      onCancel={handleCancelClose}
+      title="Unsaved Changes"
+      message="You have unsaved changes. Are you sure you want to close without saving?"
+    />
+    </>
   )
 }
 
