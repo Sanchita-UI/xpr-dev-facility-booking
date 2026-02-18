@@ -36,7 +36,7 @@ npm install
 npm run dev
 ```
 
-3. Open your browser and navigate to `http://localhost:5173`
+3. Open your browser and navigate to `http://localhost:3000`
 
 ### Build for Production
 
